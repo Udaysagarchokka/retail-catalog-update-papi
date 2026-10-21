@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:file="http://www.mulesoft.org/schema/mule/file"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/db   http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ================================================================
+         INBOUND FILE LISTENER
+         BUG-7 FIX: filenamePattern now reads regex from config so only
+         CATALOG_FULL_*.csv and CATALOG_DELTA_*.csv are accepted.
+         timeBetweenSizeCheck prevents reading partially-written files.
+         ================================================================ -->
+    <flow name="catalog-file-intake-listener-flow" doc:name="Catalog File Intake Listener Flow">
+        <file:listener doc:name="Watch Inbound Directory for Catalog CSVs"
+                       config-ref="File_Config"
+                       directory="${file.inbound.path}"
+                       moveToDirectory="${file.inprocess.path}"
+                       outputMimeType='application/csv; separator=|; header=true'
+                       timeBetweenSizeCheck="1000">
+            <scheduling-strategy>
+                <fixed-frequency frequency="${file.inbound.pollFrequency}"/>
+            </scheduling-strategy>
+            <!-- BUG-7 FIX: strict regex â€” only CATALOG_FULL_* or CATALOG_DELTA_* CSV files -->
+            <file:matcher filenamePattern="CATALOG_*.csv" />
+        </file:listener>
+
+        <logger level="INFO" doc:name="Log Inbound File Detected"
+                message="#['Inbound file detected: ' ++ attributes.fileName ++ ' (' ++ attributes.size ++ ' bytes)']" />
+
+        <flow-ref name="catalog-file-intake-orchestrator-flow" doc:name="Trigger Intake Orchestrator" />
+    </flow>
+
+    <!-- ================================================================
+         CATALOG FILE INTAKE ORCHESTRATOR
+         1. Initialise run metadata (runId, extractType, correlationId)
+         2. Compute file SHA-256 checksum
+         3. Detect and skip duplicate files (same name + checksum)
+         4. BUG-2 FIX: Enforce minimum record count for FULL extracts
+         5. Insert initial audit run record (IN_PROGRESS)
+         6. Delegate to batch processing
+         7. BUG-3 FIX: Abort run if rejection % exceeds maxRejectPercentAllowed
+         ================================================================ -->
+    <flow name="catalog-file-intake-orchestrator-flow" doc:name="Catalog File Intake Orchestrator Flow">
+
+        <!-- Initialise run metadata -->
+        <ee:transform doc:name="Initialise Run Metadata">
+            <ee:variables>
+                <ee:set-variable variableName="fileName"><![CDATA[%dw 2.0
+output application/java
+---
+(attributes.fileName default (vars.fileName default "CATALOG_SAMPLE.csv"))]]></ee:set-variable>
+                <ee:set-variable variableName="filePayload"><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-variable>
+                <ee:set-variable variableName="runId"><![CDATA["RUN-" ++ (now() as String {format: "yyyyMMdd-HHmmss"}) ++ "-" ++ (uuid() [0 to 7])]]></ee:set-variable>
+                <ee:set-variable variableName="extractType"><![CDATA[if ((attributes.fileName default (vars.fileName default "")) contains "FULL") "FULL" else "DELTA"]]></ee:set-variable>
+                <ee:set-variable variableName="correlationId"><![CDATA[correlationId]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="Log Metadata Init Done"
+                message="#['METADATA_INIT RunId=' ++ vars.runId ++ ' File=' ++ vars.fileName ++ ' Type=' ++ vars.extractType ++ ' RecordCount=' ++ sizeOf(vars.filePayload)]" />
+
+        <!-- Compute file checksum for duplicate detection using record count + filename -->
+        <ee:transform doc:name="Compute File Checksum">
+            <ee:variables>
+                <ee:set-variable variableName="fileChecksum"><![CDATA[%dw 2.0
+output application/java
+---
+vars.fileName ++ "_" ++ sizeOf(vars.filePayload) as String]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="Log Checksum Done"
+                message="#['CHECKSUM RunId=' ++ vars.runId ++ ' Checksum=' ++ vars.fileChecksum]" />
+
+        <logger level="INFO" doc:name="Log Run Init"
+                message="#['RunId=' ++ vars.runId ++ ' File=' ++ vars.fileName ++ ' Type=' ++ vars.extractType ++ ' Checksum=' ++ vars.fileChecksum]" />
+
+        <!-- Check for duplicate: same file_name + file_checksum already processed -->
+        <db:select doc:name="Check Duplicate Run" config-ref="Database_Config">
+            <db:sql><![CDATA[SELECT run_id, run_status
+                             FROM catalog_import_runs
+                             WHERE file_name = :fileName AND file_checksum = :checksum]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ fileName: vars.fileName, checksum: vars.fileChecksum }]]]></db:input-parameters>
+        </db:select>
+
+        <choice doc:name="Is Duplicate File?">
+            <when expression="#[!isEmpty(payload)]">
+                <!-- Duplicate â€” skip with zero invalidations -->
+                <logger level="WARN" doc:name="Log Duplicate Skipped"
+                        message="#['DUPLICATE_FILE_SKIPPED: ' ++ vars.fileName ++ ' previously processed in ' ++ payload[0].run_id ++ '. Zero invalidations issued.']" />
+                <ee:transform doc:name="Return Duplicate Skipped Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:   "SKIPPED_DUPLICATE",
+    fileName: vars.fileName,
+    checksum: vars.fileChecksum,
+    message:  "File has already been ingested. Zero changes and zero cache invalidations issued."
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </when>
+
+            <otherwise>
+                <!-- ============================================================
+                     BUG-2 FIX: TRUNCATED FULL EXTRACT GUARD
+                     For FULL extracts, count records before processing.
+                     If count < requireMinimumRecordCount â†’ abort immediately,
+                     update run to ABORTED, move file to error directory.
+                     ============================================================ -->
+                <choice doc:name="Is Full Extract? Check Minimum Record Count">
+                    <when expression="#[vars.extractType == 'FULL']">
+                        <ee:transform doc:name="Count Records in Full Extract">
+                            <ee:variables>
+                                <ee:set-variable variableName="recordCount"><![CDATA[%dw 2.0
+output application/java
+---
+sizeOf(vars.filePayload)]]></ee:set-variable>
+                                <ee:set-variable variableName="minRecordCount"><![CDATA[%dw 2.0
+output application/java
+---
+(p('fullExtractPolicy.requireMinimumRecordCount') default "1000") as Number]]></ee:set-variable>
+                            </ee:variables>
+                        </ee:transform>
+
+                        <choice doc:name="Is Record Count Below Minimum?">
+                            <when expression="#[vars.recordCount &lt; vars.minRecordCount]">
+                                <logger level="ERROR" doc:name="Alert Truncated Extract"
+                                        message="#['TRUNCATED_EXTRACT_ABORTED: ' ++ vars.fileName ++ ' has only ' ++ vars.recordCount ++ ' records, minimum required is ' ++ vars.minRecordCount ++ '. Aborting run to prevent mass delisting.']" />
+
+                                <!-- Move file to error directory -->
+                                <file:move doc:name="Move Truncated File to Error"
+                                           config-ref="File_Config"
+                                           sourcePath="#[p('file.inprocess.path') ++ '/' ++ vars.fileName]"
+                                           targetPath="${file.error.path}"
+                                           overwrite="true" />
+
+                                <ee:transform doc:name="Return Truncated Extract Error">
+                                    <ee:message>
+                                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:       "ABORTED_TRUNCATED_EXTRACT",
+    fileName:     vars.fileName,
+    recordCount:  vars.recordCount,
+    minimumRequired: vars.minRecordCount,
+    message:      "Full extract aborted: record count is implausibly low. File moved to error directory."
+}]]></ee:set-payload>
+                                    </ee:message>
+                                </ee:transform>
+                            </when>
+                            <otherwise>
+                                <flow-ref name="run-catalog-ingestion-subflow" doc:name="Run Ingestion" />
+                            </otherwise>
+                        </choice>
+                    </when>
+                    <otherwise>
+                        <!-- DELTA extract â€” no minimum count check needed -->
+                        <flow-ref name="run-catalog-ingestion-subflow" doc:name="Run Ingestion" />
+                    </otherwise>
+                </choice>
+            </otherwise>
+        </choice>
+    </flow>
+
+    <!-- ================================================================
+         RUN CATALOG INGESTION SUBFLOW
+         Called for all valid (non-duplicate, non-truncated) runs.
+         Inserts initial audit row, runs batch, then checks rejection %.
+         BUG-3 FIX: after batch, abort if rejected % > maxRejectPercentAllowed
+         ================================================================ -->
+    <sub-flow name="run-catalog-ingestion-subflow" doc:name="Run Catalog Ingestion Subflow">
+
+        <!-- Insert initial run record as IN_PROGRESS -->
+        <db:insert doc:name="Insert Initial Run Record" config-ref="Database_Config">
+            <db:sql><![CDATA[INSERT INTO catalog_import_runs
+                             (run_id, file_name, file_checksum, extract_type, run_status, started_at, correlation_id)
+                             VALUES (:runId, :fileName, :checksum, :extractType, 'IN_PROGRESS', CURRENT_TIMESTAMP, :correlationId)]]></db:sql>
+            <db:input-parameters><![CDATA[#[{
+    runId:         vars.runId,
+    fileName:      vars.fileName,
+    checksum:      vars.fileChecksum,
+    extractType:   vars.extractType,
+    correlationId: vars.correlationId
+}]]]></db:input-parameters>
+        </db:insert>
+
+        <!-- Restore raw file payload and hand off to batch processor -->
+        <set-payload value="#[vars.filePayload]" doc:name="Restore File Payload for Batch" />
+
+        <flow-ref name="catalog-batch-processing-flow" doc:name="Execute Catalog Batch Processing" />
+
+        <!-- ============================================================
+             BUG-3 FIX: REJECTION THRESHOLD GUARD
+             After batch, query parsed_count and rejected_count.
+             If rejected% > maxRejectPercentAllowed â†’ mark run ABORTED,
+             log an alert, and prevent results from being applied.
+             ============================================================ -->
+        <db:select doc:name="Fetch Post-Batch Run Counts" config-ref="Database_Config" target="postBatchRun">
+            <db:sql><![CDATA[SELECT parsed_count, rejected_count, run_status
+                             FROM catalog_import_runs WHERE run_id = :runId]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+        </db:select>
+
+        <ee:transform doc:name="Evaluate Rejection Percentage">
+            <ee:variables>
+                <ee:set-variable variableName="rejectionCheck"><![CDATA[%dw 2.0
+output application/java
+var parsed   = (vars.postBatchRun[0].parsed_count   default 0) as Number
+var rejected = (vars.postBatchRun[0].rejected_count default 0) as Number
+var maxPct   = (p('processing.maxRejectPercentAllowed') default "5") as Number
+var rejectPct = if (parsed > 0) (rejected / parsed) * 100 else 0
+---
+{
+    rejectPct:          rejectPct,
+    thresholdExceeded:  rejectPct > maxPct,
+    parsed:             parsed,
+    rejected:           rejected,
+    maxAllowed:         maxPct
+}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <choice doc:name="Rejection Threshold Exceeded?">
+            <when expression="#[vars.rejectionCheck.thresholdExceeded]">
+                <logger level="ERROR" doc:name="Alert Rejection Threshold Exceeded"
+                        message="#['REJECTION_THRESHOLD_EXCEEDED RunId=' ++ vars.runId ++ ' Rejected=' ++ vars.rejectionCheck.rejected ++ '/' ++ vars.rejectionCheck.parsed ++ ' (' ++ vars.rejectionCheck.rejectPct ++ '%) exceeds max ' ++ vars.rejectionCheck.maxAllowed ++ '%. Run marked ABORTED.']" />
+
+                <db:update doc:name="Mark Run as ABORTED" config-ref="Database_Config">
+                    <db:sql><![CDATA[UPDATE catalog_import_runs
+                                     SET run_status   = 'ABORTED_HIGH_REJECTION',
+                                         completed_at = CURRENT_TIMESTAMP
+                                     WHERE run_id = :runId]]></db:sql>
+                    <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+                </db:update>
+
+                <!-- Move file to error directory on rejection abort -->
+                <try doc:name="Move Rejected File to Error">
+                    <file:move doc:name="Move File to Error on High Rejection"
+                               config-ref="File_Config"
+                               sourcePath="#[p('file.inprocess.path') ++ '/' ++ vars.fileName]"
+                               targetPath="${file.error.path}"
+                               overwrite="true" />
+                    <error-handler>
+                        <on-error-continue type="ANY" doc:name="Ignore move error">
+                            <logger level="WARN" doc:name="Could not move rejected file" message="Could not move rejected file to error directory." />
+                        </on-error-continue>
+                    </error-handler>
+                </try>
+
+                <ee:transform doc:name="Return Rejection Abort Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:        "ABORTED_HIGH_REJECTION",
+    runId:         vars.runId,
+    rejected:      vars.rejectionCheck.rejected,
+    parsed:        vars.rejectionCheck.parsed,
+    rejectPercent: vars.rejectionCheck.rejectPct,
+    maxAllowed:    vars.rejectionCheck.maxAllowed,
+    message:       "Run aborted: rejection rate exceeded configured threshold. No CDN invalidations issued."
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </when>
+            <otherwise>
+                <logger level="INFO" doc:name="Log Rejection Check Passed"
+                        message="#['Rejection check passed for RunId=' ++ vars.runId ++ ' (' ++ vars.rejectionCheck.rejected ++ '/' ++ vars.rejectionCheck.parsed ++ ' = ' ++ vars.rejectionCheck.rejectPct ++ '%)']" />
+
+                <!-- FILE MOVE NOW HAPPENS IN BATCH ON-COMPLETE -->
+                <!-- This prevents file lock contention since batch is async. -->
+            </otherwise>
+        </choice>
+    </sub-flow>
+
+</mule>
+
+

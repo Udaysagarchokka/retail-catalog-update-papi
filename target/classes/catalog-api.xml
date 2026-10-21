@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http        http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+        http://www.mulesoft.org/schema/mule/db          http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/ee/core     http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ================================================================
+         MAIN API ENTRY POINT
+         Single HTTP Listener → APIKit Router → individual operation flows
+         All routing is driven by retail-catalog-papi.raml (BUG-1 FIX)
+         ================================================================ -->
+    <flow name="trigger-catalog-ingest-api-flow" doc:name="Retail Catalog PAPI Main Flow">
+        <http:listener config-ref="HTTP_Listener_config"
+                       path="/api/v1/catalog/*"
+                       doc:name="HTTP Listener /api/v1/catalog/*">
+            <http:response statusCode="#[vars.httpStatus default 200]" />
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+            </http:error-response>
+        </http:listener>
+
+        <apikit:router config-ref="retail-catalog-apikit-config" doc:name="APIKit Router" />
+    </flow>
+
+    <!-- APIKit 404 / 405 / 406 / 415 console error flows -->
+    <flow name="retail-catalog-apikit-console" doc:name="APIKit Console">
+        <http:listener config-ref="HTTP_Listener_config"
+                       path="/api/v1/catalog/console/*"
+                       doc:name="APIKit Console Listener" />
+        <apikit:console config-ref="retail-catalog-apikit-config" doc:name="APIKit Console" />
+    </flow>
+
+    <!-- ================================================================
+         POST /catalog/trigger  — Manually trigger catalog ingestion
+         Receives pipe-delimited CSV body, runs intake orchestrator
+         ================================================================ -->
+    <flow name="post:\catalog\trigger:retail-catalog-apikit-config" doc:name="POST /catalog/trigger">
+
+        <ee:transform doc:name="Capture Filename from Header">
+            <ee:variables>
+                <ee:set-variable variableName="fileName"><![CDATA[%dw 2.0
+output application/java
+---
+attributes.headers['filename'] default ("CATALOG_MANUAL_" ++ (now() as String {format: "yyyyMMdd_HHmmss"}) ++ ".csv")]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <flow-ref name="catalog-file-intake-orchestrator-flow" doc:name="Call Intake Orchestrator" />
+
+        <ee:transform doc:name="Build 200 Trigger Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:    "ACCEPTED",
+    runId:     vars.runId,
+    message:   "Catalog ingestion initiated successfully.",
+    fileName:  vars.fileName,
+    timestamp: now()
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[200]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </flow>
+
+    <!-- ================================================================
+         GET /catalog/runs  — Retrieve all catalog import run audit records
+         ================================================================ -->
+    <flow name="get:\catalog\runs:retail-catalog-apikit-config" doc:name="GET /catalog/runs">
+        <db:select doc:name="Select All Import Runs" config-ref="Database_Config">
+            <db:sql><![CDATA[SELECT * FROM catalog_import_runs ORDER BY started_at DESC]]></db:sql>
+        </db:select>
+        <ee:transform doc:name="Transform Runs to JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[200]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </flow>
+
+    <!-- ================================================================
+         GET /catalog/products  — Retrieve all products in the catalog DB
+         ================================================================ -->
+    <flow name="get:\catalog\products:retail-catalog-apikit-config" doc:name="GET /catalog/products">
+        <db:select doc:name="Select All Products" config-ref="Database_Config">
+            <db:sql><![CDATA[SELECT * FROM products ORDER BY updated_at DESC]]></db:sql>
+        </db:select>
+        <ee:transform doc:name="Transform Products to JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[200]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </flow>
+
+    <!-- ================================================================
+         GET /catalog/history  — Retrieve field-level change history
+         ================================================================ -->
+    <flow name="get:\catalog\history:retail-catalog-apikit-config" doc:name="GET /catalog/history">
+        <db:select doc:name="Select All Change History" config-ref="Database_Config">
+            <db:sql><![CDATA[SELECT * FROM product_change_history ORDER BY changed_at DESC]]></db:sql>
+        </db:select>
+        <ee:transform doc:name="Transform History to JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[200]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </flow>
+
+    <!-- ================================================================
+         GET /catalog/invalidations  — Retrieve CDN invalidation audit records
+         ================================================================ -->
+    <flow name="get:\catalog\invalidations:retail-catalog-apikit-config" doc:name="GET /catalog/invalidations">
+        <db:select doc:name="Select All CDN Invalidations" config-ref="Database_Config">
+            <db:sql><![CDATA[SELECT * FROM cdn_invalidations ORDER BY requested_at DESC]]></db:sql>
+        </db:select>
+        <ee:transform doc:name="Transform Invalidations to JSON">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="httpStatus"><![CDATA[200]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+    </flow>
+
+    <!-- ================================================================
+         MOCK CDN SERVICE (self-contained, no external dependency needed)
+         POST /mock-cdn/api/v2/invalidations
+         Simulates: 202 Accepted / 429 Rate Limit / 207 Partial Rejection
+         ================================================================ -->
+    <flow name="mock-cdn-invalidation-service-flow" doc:name="Mock CDN Invalidation Service Flow">
+        <http:listener config-ref="HTTP_Listener_config"
+                       path="/mock-cdn/api/v2/invalidations"
+                       doc:name="POST /mock-cdn/api/v2/invalidations">
+            <http:response statusCode="#[vars.mockStatusCode default 202]" />
+        </http:listener>
+
+        <logger level="INFO" doc:name="Log Mock CDN Request"
+                message="#['Mock CDN received: distributionId=' ++ (payload.distributionId default '') ++ ' paths=' ++ sizeOf(payload.paths default [])]" />
+
+        <choice doc:name="Simulate CDN Response Type">
+            <when expression="#[attributes.headers['simulate-rate-limit'] == 'true']">
+                <set-variable variableName="mockStatusCode" value="#[429]" doc:name="Set 429 Status" />
+                <ee:transform doc:name="Build 429 Rate Limit Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    error:             "RATE_LIMIT_EXCEEDED",
+    message:           "Request quota exceeded for this distribution",
+    retryAfterSeconds: 30
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </when>
+            <when expression="#[attributes.headers['simulate-multi-status'] == 'true']">
+                <set-variable variableName="mockStatusCode" value="#[207]" doc:name="Set 207 Status" />
+                <ee:transform doc:name="Build 207 Partial Rejection Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    invalidationId: "INV-8841200932",
+    accepted: payload.paths filter (!($ contains "INVALID")),
+    rejected: (payload.paths filter ($ contains "INVALID")) map (p) -> {
+        path:   p,
+        reason: "INVALID_PATH_PATTERN"
+    }
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </when>
+            <otherwise>
+                <set-variable variableName="mockStatusCode" value="#[202]" doc:name="Set 202 Status" />
+                <ee:transform doc:name="Build 202 Accepted Response">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    invalidationId: "INV-" ++ (uuid() [0 to 9]),
+    status:         "IN_PROGRESS",
+    pathCount:      sizeOf(payload.paths default []),
+    acceptedAt:     now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </otherwise>
+        </choice>
+    </flow>
+
+</mule>

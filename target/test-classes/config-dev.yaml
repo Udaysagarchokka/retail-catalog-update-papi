@@ -1,0 +1,34 @@
+http:
+  port: "8081"
+  basePath: "/api/v1"
+api:
+  id: "19876543"
+
+file:
+  inbound:
+    path: "data/input"
+    pattern: "^(CATALOG_FULL_|CATALOG_DELTA_).*\\.csv$"
+    pollFrequency: "10000"
+  inprocess:
+    path: "data/in-process"
+  archive:
+    path: "data/archive"
+  error:
+    path: "data/error"
+
+db:
+  host: "localhost"
+  port: "3306"
+  name: "retail_catalog_test"
+  user: "test_user"
+  password: "test_password"
+
+cdn:
+  protocol: "HTTP"
+  host: "localhost"
+  port: "8081"
+  path: "/mock-cdn/api/v2/invalidations"
+  distributionId: "DIST-RETAIL-TEST-01"
+  api:
+    token: "mock-cdn-bearer-token-test"
+  timeout: "5000"

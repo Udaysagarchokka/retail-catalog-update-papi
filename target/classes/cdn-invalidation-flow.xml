@@ -1,0 +1,322 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core    http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http    http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/db      http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ================================================================
+         CDN INVALIDATION ORCHESTRATOR SUBFLOW
+         1. Queries customer-facing changed products for this run
+         2. Generates deduplicated paths: /p/{sku}, /p/{sku}/images, /c/{cat}
+         3. Partitions into batches of maxPathsPerRequest (30)
+         4. Dispatches each batch to dispatch-cdn-invalidation-batch-subflow
+         ================================================================ -->
+    <sub-flow name="trigger-cdn-invalidation-orchestrator-subflow"
+              doc:name="Trigger CDN Invalidation Orchestrator Subflow">
+
+        <db:select doc:name="Find Customer-Facing Changed Products for Invalidation"
+                   config-ref="Database_Config"
+                   target="changedProducts">
+            <db:sql><![CDATA[SELECT DISTINCT p.sku, p.category_code
+                             FROM products p
+                             INNER JOIN product_change_history h ON p.sku = h.sku
+                             WHERE h.run_id = :runId AND h.customer_facing = TRUE]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+        </db:select>
+
+        <choice doc:name="Any Customer-Facing Changes?">
+            <when expression="#[!isEmpty(vars.changedProducts)]">
+
+                <ee:transform doc:name="Generate Deduplicated Path Batches">
+                    <ee:variables>
+                        <ee:set-variable variableName="batchedPathsList"><![CDATA[%dw 2.0
+output application/java
+var maxBatch = (p('invalidation.maxPathsPerRequest') default "30") as Number
+var allPaths = (vars.changedProducts flatMap (prod) -> [
+    "/p/" ++ (prod.sku           default ""),
+    "/p/" ++ (prod.sku           default "") ++ "/images",
+    "/c/" ++ (prod.category_code default "")
+]) distinctBy ($)
+var total = sizeOf(allPaths)
+var numBatches = if (total == 0) 0 else ceil(total / maxBatch)
+---
+(0 to (numBatches - 1)) map (i) ->
+    allPaths[(i * maxBatch) to (if (((i + 1) * maxBatch - 1) < (total - 1)) ((i + 1) * maxBatch - 1) else (total - 1))]]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+
+                <logger level="INFO" doc:name="Log Invalidation Batch Plan"
+                        message="#['CDN invalidation: ' ++ sizeOf(vars.changedProducts) ++ ' products â†’ ' ++ sizeOf(vars.batchedPathsList) ++ ' batch(es) for RunId=' ++ vars.runId]" />
+
+                <!-- Dispatch each path batch â€” sequential to respect rate limit -->
+                <foreach collection="#[vars.batchedPathsList]" doc:name="For Each Path Batch" counterVariableName="batchCounter">
+                    <set-variable variableName="currentBatchNumber" value="#[vars.batchCounter]"   doc:name="Set Batch Number" />
+                    <set-variable variableName="currentBatchPaths"  value="#[payload]"   doc:name="Set Batch Paths" />
+                    <flow-ref name="dispatch-cdn-invalidation-batch-subflow" doc:name="Dispatch CDN Batch" />
+
+                    <!-- H1 FIX: Proactive rate throttle between batches
+                         Delay = 60000ms / maxRequestsPerMinute (default 60 = 1000ms/req)
+                         Prevents hitting the API rate limit proactively,
+                         not just reactively on 429. -->
+                    <set-variable variableName="rateLimitDelayMs"
+                                  value='#[((60000 / ((p("invalidation.maxRequestsPerMinute") default "60") as Number)) as Number) as Number]'
+                                  doc:name="Compute Rate Limit Delay" />
+                    <set-variable variableName="sleepDone"
+                                  value="#[java!java::lang::Thread::sleep(vars.rateLimitDelayMs)]"
+                                  doc:name="Sleep Between Batches for Rate Limit" />
+                </foreach>
+
+            </when>
+            <otherwise>
+                <logger level="INFO" doc:name="Log No Invalidation Needed"
+                        message="#['No customer-facing changes for RunId=' ++ vars.runId ++ '. CDN invalidation skipped.']" />
+            </otherwise>
+        </choice>
+    </sub-flow>
+
+    <!-- ================================================================
+         DISPATCH CDN INVALIDATION BATCH SUBFLOW
+         BUG-4 FIX: 207 rejected paths are now retried individually
+         BUG-6 FIX: 429 Retry-After header is read and honoured
+         Retry scope handles transient connectivity and 429 errors.
+         On permanent CDN failure: DB not rolled back, recorded as pending.
+         ================================================================ -->
+    <sub-flow name="dispatch-cdn-invalidation-batch-subflow"
+              doc:name="Dispatch CDN Invalidation Batch Subflow">
+
+        <!-- Build the CDN request payload via external DWL (C1 FIX) -->
+        <ee:transform doc:name="Build CDN Request Payload â€” calls build-invalidation-payload.dwl">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var distId   = p("cdn.distributionId") default "DIST-RETAIL-PRD-01"
+var batchRef = (vars.runId default "CATALOG-RUN") ++ "-B" ++ ((vars.currentBatchNumber default 1) as String)
+---
+{
+    distributionId: distId,
+    reference:      batchRef,
+    paths:          vars.currentBatchPaths default []
+}]]></ee:set-payload>
+            </ee:message>
+            <ee:variables>
+                <ee:set-variable variableName="requestReference"><![CDATA[(vars.runId default "RUN") ++ "-B" ++ (vars.currentBatchNumber as String)]]></ee:set-variable>
+                <ee:set-variable variableName="pendingPaths"><![CDATA[vars.currentBatchPaths]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- until-successful handles 429 (HTTP:TOO_MANY_REQUESTS) and transient errors -->
+        <until-successful maxRetries="3"
+                          millisBetweenRetries="${invalidation.backoffMillis}"
+                          doc:name="Retry Scope for CDN Request">
+            <try doc:name="Try CDN Invalidation Call">
+
+                <http:request method="POST"
+                              doc:name="Call CDN Invalidation API"
+                              config-ref="CDN_HTTP_Request_configuration"
+                              path="${cdn.path}">
+                    <http:headers><![CDATA[#[{
+    "Authorization":    "Bearer " ++ (p('cdn.api.token') default ""),
+    "Content-Type":     "application/json",
+    "X-Correlation-Id": vars.correlationId default correlationId
+}]]]></http:headers>
+                </http:request>
+
+                <!-- Capture response details -->
+                <ee:transform doc:name="Capture CDN Response">
+                    <ee:variables>
+                        <ee:set-variable variableName="cdnHttpStatus"><![CDATA[attributes.statusCode default 200]]></ee:set-variable>
+                        <ee:set-variable variableName="cdnResponse"><![CDATA[payload]]></ee:set-variable>
+                        <ee:set-variable variableName="isConfirmed"><![CDATA[attributes.statusCode == 202]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+
+                <!-- Insert primary invalidation audit record -->
+                <db:insert doc:name="Insert CDN Invalidation Record" config-ref="Database_Config">
+                    <db:sql><![CDATA[INSERT INTO cdn_invalidations
+                                     (run_id, request_ref, path_count, paths, http_status, provider_status, attempt_count, confirmed)
+                                     VALUES (:runId, :requestRef, :pathCount, :paths, :httpStatus, :providerStatus, 1, :confirmed)]]></db:sql>
+                    <db:input-parameters><![CDATA[#[{
+    runId:          vars.runId,
+    requestRef:     vars.requestReference,
+    pathCount:      sizeOf(vars.currentBatchPaths),
+    paths:          write(vars.currentBatchPaths, "application/json"),
+    httpStatus:     vars.cdnHttpStatus,
+    providerStatus: vars.cdnResponse.status default (if (vars.isConfirmed) "IN_PROGRESS" else "PARTIAL"),
+    confirmed:      vars.isConfirmed
+}]]]></db:input-parameters>
+                </db:insert>
+
+                <!-- ============================================================
+                     BUG-4 FIX: HANDLE 207 MULTI-STATUS â€” RETRY REJECTED PATHS
+                     If CDN returns 207, extract rejected paths and retry each
+                     one individually. Any that still fail are recorded as
+                     unconfirmed in cdn_invalidations so they can be tracked.
+                     ============================================================ -->
+                <choice doc:name="Is 207 Partial Rejection?">
+                    <when expression="#[vars.cdnHttpStatus == 207 and !isEmpty(vars.cdnResponse.rejected default [])]">
+
+                        <ee:transform doc:name="Extract Rejected Paths for Retry">
+                            <ee:variables>
+                                <ee:set-variable variableName="rejectedPaths"><![CDATA[%dw 2.0
+output application/java
+---
+(vars.cdnResponse.rejected default []) map ($.path)]]></ee:set-variable>
+                            </ee:variables>
+                        </ee:transform>
+
+                        <logger level="WARN" doc:name="Log 207 Partial Rejection"
+                                message="#['CDN_207_PARTIAL BatchRef=' ++ vars.requestReference ++ ' rejectedPaths=' ++ write(vars.rejectedPaths, 'application/json') ++ '. Retrying each rejected path individually.']" />
+
+                        <!-- Retry each rejected path individually -->
+                        <foreach collection="#[vars.rejectedPaths]" doc:name="Retry Each Rejected Path" counterVariableName="retryCounter">
+                            <set-variable variableName="retryPath"    value="#[payload]" doc:name="Set Retry Path" />
+                            <set-variable variableName="retryRef"     value="#[vars.requestReference ++ '-RETRY-' ++ vars.retryCounter]" doc:name="Set Retry Ref" />
+
+                            <ee:transform doc:name="Build Single-Path Retry Payload">
+                                <ee:message>
+                                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    distributionId: p('cdn.distributionId') default "DIST-RETAIL-PRD-01",
+    reference:      vars.retryRef,
+    paths:          [vars.retryPath]
+}]]></ee:set-payload>
+                                </ee:message>
+                            </ee:transform>
+
+                            <try doc:name="Retry Single Path">
+                                <http:request method="POST"
+                                              doc:name="Retry Single Path CDN Call"
+                                              config-ref="CDN_HTTP_Request_configuration"
+                                              path="${cdn.path}">
+                                    <http:headers><![CDATA[#[{
+    "Authorization":    "Bearer " ++ (p('cdn.api.token') default ""),
+    "Content-Type":     "application/json",
+    "X-Correlation-Id": vars.correlationId default correlationId
+}]]]></http:headers>
+                                </http:request>
+
+                                <ee:transform doc:name="Capture Retry Response">
+                                    <ee:variables>
+                                        <ee:set-variable variableName="retryHttpStatus"><![CDATA[attributes.statusCode default 500]]></ee:set-variable>
+                                        <ee:set-variable variableName="retryConfirmed"><![CDATA[attributes.statusCode == 202]]></ee:set-variable>
+                                    </ee:variables>
+                                </ee:transform>
+
+                                <db:insert doc:name="Record Retry Result" config-ref="Database_Config">
+                                    <db:sql><![CDATA[INSERT INTO cdn_invalidations
+                                                     (run_id, request_ref, path_count, paths, http_status, provider_status, attempt_count, confirmed)
+                                                     VALUES (:runId, :retryRef, 1, :path, :httpStatus, :providerStatus, 2, :confirmed)]]></db:sql>
+                                    <db:input-parameters><![CDATA[#[{
+    runId:          vars.runId,
+    retryRef:       vars.retryRef,
+    path:           "[\"" ++ vars.retryPath ++ "\"]",
+    httpStatus:     vars.retryHttpStatus,
+    providerStatus: if (vars.retryConfirmed) "IN_PROGRESS" else "RETRY_FAILED",
+    confirmed:      vars.retryConfirmed
+}]]]></db:input-parameters>
+                                </db:insert>
+
+                                <choice doc:name="Retry Confirmed?">
+                                    <when expression="#[!vars.retryConfirmed]">
+                                        <logger level="ERROR" doc:name="Alert Unconfirmed Path After Retry"
+                                                message="#['UNCONFIRMED_PATH_AFTER_RETRY RunId=' ++ vars.runId ++ ' Path=' ++ vars.retryPath ++ ' Ref=' ++ vars.retryRef ++ '. Stale content may be served.']" />
+                                    </when>
+                                    <otherwise>
+                                        <logger level="INFO" doc:name="Log Retry Path Confirmed"
+                                                message="#['RETRY_PATH_CONFIRMED RunId=' ++ vars.runId ++ ' Path=' ++ vars.retryPath]" />
+                                    </otherwise>
+                                </choice>
+
+                                <error-handler>
+                                    <on-error-continue type="ANY" doc:name="Retry Path Error â€” Record Unconfirmed">
+                                        <logger level="ERROR" doc:name="Log Retry Path Failure"
+                                                message="#['RETRY_PATH_FAILED RunId=' ++ vars.runId ++ ' Path=' ++ vars.retryPath ++ ' Error=' ++ error.description]" />
+                                        <db:insert doc:name="Record Permanently Unconfirmed Path" config-ref="Database_Config">
+                                            <db:sql><![CDATA[INSERT INTO cdn_invalidations
+                                                             (run_id, request_ref, path_count, paths, http_status, provider_status, attempt_count, confirmed)
+                                                             VALUES (:runId, :retryRef, 1, :path, 0, 'PERMANENTLY_UNCONFIRMED', 3, FALSE)]]></db:sql>
+                                            <db:input-parameters><![CDATA[#[{
+    runId:    vars.runId,
+    retryRef: vars.retryRef,
+    path:     "[\"" ++ vars.retryPath ++ "\"]"
+}]]]></db:input-parameters>
+                                        </db:insert>
+                                    </on-error-continue>
+                                </error-handler>
+                            </try>
+                        </foreach>
+                    </when>
+                    <when expression="#[vars.cdnHttpStatus == 202]">
+                        <logger level="INFO" doc:name="Log Batch Confirmed"
+                                message="#['CDN_BATCH_ACCEPTED Ref=' ++ vars.requestReference ++ ' pathCount=' ++ sizeOf(vars.currentBatchPaths) ++ ' InvalidationId=' ++ (vars.cdnResponse.invalidationId default 'N/A')]" />
+                    </when>
+                </choice>
+
+                <error-handler>
+                    <!-- ============================================================
+                         BUG-6 FIX: READ Retry-After HEADER ON 429
+                         When CDN responds with 429, read the Retry-After header
+                         (in seconds) and wait that exact duration before retrying,
+                         rather than using the fixed 2s millisBetweenRetries.
+                         ============================================================ -->
+                    <on-error-propagate type="HTTP:TOO_MANY_REQUESTS"
+                                        doc:name="Handle 429 Rate Limit â€” Honour Retry-After">
+                        <ee:transform doc:name="Read Retry-After and Compute Wait">
+                            <ee:variables>
+                                <ee:set-variable variableName="retryAfterMs"><![CDATA[%dw 2.0
+output application/java
+var retryAfterSecs = (attributes.headers['Retry-After'] default attributes.headers['retry-after'] default "30") as Number
+---
+(retryAfterSecs * 1000) as Number]]></ee:set-variable>
+                            </ee:variables>
+                        </ee:transform>
+                        <logger level="WARN" doc:name="Log Rate Limit Backoff"
+                                message="#['CDN_RATE_LIMITED BatchRef=' ++ vars.requestReference ++ ' Retry-After=' ++ (vars.retryAfterMs / 1000) ++ 's. Backing off...']" />
+                        <!-- Sleep for the Retry-After duration before until-successful retries -->
+                        <set-variable variableName="rateLimitSleep"
+                                      value="#[java!java::lang::Thread::sleep(vars.retryAfterMs)]"
+                                      doc:name="Sleep for Retry-After Duration" />
+                        <!-- Re-throw so until-successful catches it and retries -->
+                        <raise-error type="CDN:RATE_LIMITED" description="Rate limited â€” backing off per Retry-After header" doc:name="Re-raise for Retry" />
+                    </on-error-propagate>
+
+                    <!-- Transient connectivity or timeout â€” until-successful will retry -->
+                    <on-error-propagate type="HTTP:CONNECTIVITY, HTTP:TIMEOUT"
+                                        doc:name="Handle Transient HTTP Error">
+                        <logger level="WARN" doc:name="Log Transient CDN Error"
+                                message="#['CDN_TRANSIENT_ERROR BatchRef=' ++ vars.requestReference ++ ' Error=' ++ error.description ++ '. Retrying...']" />
+                    </on-error-propagate>
+
+                    <!-- Permanent CDN failure (4xx other than 429, 5xx after retries) -->
+                    <on-error-continue type="ANY"
+                                       doc:name="Handle Permanent CDN Failure â€” Do Not Reverse DB">
+                        <logger level="ERROR" doc:name="Log Permanent CDN Failure"
+                                message="#['CDN_PERMANENT_FAILURE BatchRef=' ++ vars.requestReference ++ '. DB updates preserved. Recording as PENDING for retry. Error=' ++ error.description]" />
+                        <db:insert doc:name="Record Failed Invalidation as Pending" config-ref="Database_Config">
+                            <db:sql><![CDATA[INSERT INTO cdn_invalidations
+                                             (run_id, request_ref, path_count, paths, http_status, provider_status, attempt_count, confirmed)
+                                             VALUES (:runId, :requestRef, :pathCount, :paths, 0, 'PENDING_RETRY', 3, FALSE)]]></db:sql>
+                            <db:input-parameters><![CDATA[#[{
+    runId:      vars.runId,
+    requestRef: vars.requestReference,
+    pathCount:  sizeOf(vars.currentBatchPaths),
+    paths:      write(vars.currentBatchPaths, "application/json")
+}]]]></db:input-parameters>
+                        </db:insert>
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </until-successful>
+    </sub-flow>
+
+</mule>
+

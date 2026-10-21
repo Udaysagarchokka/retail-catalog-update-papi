@@ -1,0 +1,6 @@
+sku|productName|categoryCode|brand|price|currency|taxClass|stockStatus|productStatus|shortDescription|imagePath|updatedAt
+SKU-TSHIRT-BLK-M|Classic Cotton T-Shirt Black Medium|CAT-APP-TOP|UrbanThread|1349.00|INR|GST12|IN_STOCK|ACTIVE|Soft combed cotton crew neck tee|/img/apparel/tshirt-blk-m-v3.jpg|2026-09-11T06:45:00+05:30
+SKU-SHOE-BRN-42|Leather Derby Shoe Brown Size 42|CAT-FTW-FRM|StrideCo|4499.00|INR|GST18|IN_STOCK|ACTIVE|Full grain leather derby with cushioned sole|/img/footwear/derby-brn-42-v2.jpg|2026-09-11T05:45:00+05:30
+SKU-KEYB-WL-01|Wireless Keyboard Compact|CAT-ELE-ACC|TypeTech|1499.00|INR|GST12|IN_STOCK|ACTIVE|Compact 2.4GHz wireless keyboard|/img/electronics/keyb-wl-01-v1.jpg|2026-09-11T06:45:00+05:30
+SKU-LAMP-DSK-11|LED Desk Lamp Adjustable|CAT-HOM-LIT|LumaWorks|1850.00|INR|GST18|IN_STOCK|DISCONTINUED|Three level dimmable LED desk lamp|/img/home/lamp-dsk-11-v2.jpg|2026-09-11T06:45:00+05:30
+SKU-HEADSET-PRO-01|Pro Wireless Gaming Headset|CAT-ELE-ACC|SonicSound|2999.00|INR|GST18|IN_STOCK|ACTIVE|Surround sound gaming headset with mic|/img/electronics/headset-pro-01-v1.jpg|2026-09-11T06:45:00+05:30

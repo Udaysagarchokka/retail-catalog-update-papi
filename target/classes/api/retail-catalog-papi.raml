@@ -1,0 +1,162 @@
+#%RAML 1.0
+title: Retail Real-Time Product Catalog Update Process API
+version: v1
+baseUri: http://localhost:8081/api/{version}
+protocols: [ HTTP, HTTPS ]
+mediaType: application/json
+
+description: Process API for real-time retail product catalog updates with streamed delta logic, price guardrails, and CDN invalidation.
+
+types:
+  TriggerResponse:
+    type: object
+    properties:
+      status:    string
+      runId:     string
+      message:   string
+      fileName:  string
+      timestamp: string
+
+  RunRecord:
+    type: object
+    properties:
+      run_id:         string
+      file_name:      string
+      file_checksum:  string
+      extract_type:   string
+      new_count:      integer
+      changed_count:  integer
+      unchanged_count: integer
+      held_count:     integer
+      run_status:     string
+
+  ProductRecord:
+    type: object
+    properties:
+      sku:            string
+      product_name:   string
+      category_code:  string
+      price:          number
+      currency:       string
+      stock_status:   string
+      product_status: string
+      review_hold:    boolean
+
+  HistoryRecord:
+    type: object
+    properties:
+      change_seq:     integer
+      run_id:         string
+      sku:            string
+      change_type:    string
+      field_name:     string
+      old_value:      string
+      new_value:      string
+      customer_facing: boolean
+
+  InvalidationRecord:
+    type: object
+    properties:
+      invalidation_seq: integer
+      run_id:           string
+      request_ref:      string
+      path_count:       integer
+      http_status:      integer
+      provider_status:  string
+      confirmed:        boolean
+
+/catalog:
+  /trigger:
+    post:
+      description: Manually trigger catalog file ingestion and delta processing.
+      headers:
+        filename?:
+          type: string
+          description: Name of the catalog file being ingested.
+          example: CATALOG_FULL_20260911_0600.csv
+      body:
+        text/csv:
+          description: Pipe-delimited catalog file contents.
+      responses:
+        200:
+          body:
+            application/json:
+              type: TriggerResponse
+              example:
+                status: "ACCEPTED"
+                runId: "RUN-20260911-060000-a1b2c3d4"
+                message: "Catalog ingestion initiated successfully."
+                fileName: "CATALOG_FULL_20260911_0600.csv"
+                timestamp: "2026-09-11T06:00:01Z"
+
+  /runs:
+    get:
+      description: Retrieve catalog import execution audit history.
+      responses:
+        200:
+          body:
+            application/json:
+              type: RunRecord[]
+              example:
+                - run_id: "RUN-20260911-060000-a1b2c3d4"
+                  file_name: "CATALOG_FULL_20260911_0600.csv"
+                  file_checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                  extract_type: "FULL"
+                  new_count: 5
+                  changed_count: 1
+                  unchanged_count: 0
+                  held_count: 1
+                  run_status: "COMPLETED"
+
+  /products:
+    get:
+      description: Retrieve products currently stored in the catalog database.
+      responses:
+        200:
+          body:
+            application/json:
+              type: ProductRecord[]
+              example:
+                - sku: "SKU-TSHIRT-BLK-M"
+                  product_name: "Classic Cotton T-Shirt Black Medium"
+                  category_code: "CAT-APP-TOP"
+                  price: 1299.00
+                  currency: "INR"
+                  stock_status: "IN_STOCK"
+                  product_status: "ACTIVE"
+                  review_hold: false
+
+  /history:
+    get:
+      description: Retrieve field-by-field audit history of all catalog modifications.
+      responses:
+        200:
+          body:
+            application/json:
+              type: HistoryRecord[]
+              example:
+                - change_seq: 1
+                  run_id: "RUN-20260911-060000-a1b2c3d4"
+                  sku: "SKU-TSHIRT-BLK-M"
+                  change_type: "CHANGED_CUSTOMER_FACING"
+                  field_name: "price"
+                  old_value: "1299.00"
+                  new_value: "1349.00"
+                  customer_facing: true
+
+  /invalidations:
+    get:
+      description: Retrieve CDN cache invalidation audit records.
+      responses:
+        200:
+          body:
+            application/json:
+              type: InvalidationRecord[]
+              example:
+                - invalidation_seq: 1
+                  run_id: "RUN-20260911-060000-a1b2c3d4"
+                  request_ref: "CATALOG-RUN-2026-09-11-0600-B1"
+                  path_count: 3
+                  http_status: 202
+                  provider_status: "IN_PROGRESS"
+                  confirmed: true

@@ -1,0 +1,111 @@
+﻿sku|productName|categoryCode|brand|price|currency|taxClass|stockStatus|productStatus|shortDescription|imagePath|updatedAt
+SKU1001|Classic Cotton T-Shirt|CAT-APP-TOP|UrbanWear|549.00|INR|GST5|IN_STOCK|ACTIVE|Updated cotton T-shirt with improved fabric|/img/SKU1001.jpg|2026-10-13 11:00:00
+SKU1002|Running Shoes|CAT-FTW-FRM|SpeedStep|2499.00|INR|GST18|IN_STOCK|ACTIVE|Lightweight running shoes|/img/SKU1002.jpg|2026-10-12 09:41:39
+SKU1003|Wireless Keyboard|CAT-ELE-ACC|KeyPro Plus|1399.00|INR|GST18|IN_STOCK|ACTIVE|Wireless keyboard with compact design|/img/SKU1003.jpg|2026-10-13 11:00:00
+SKU1004|Wireless Mouse|CAT-ELE-ACC|ClickTech|799.00|INR|GST18|IN_STOCK|ACTIVE|Ergonomic wireless mouse|/img/SKU1004.jpg|2026-10-12 09:41:39
+SKU1005|Stainless Steel Water Bottle|CAT-HOM-LIT|AquaLife|649.00|INR|GST12|IN_STOCK|ACTIVE|Reusable stainless steel bottle|/img/SKU1005.jpg|2026-10-13 11:00:00
+SKU1006|LED Table Lamp|CAT-HOM-LIT|BrightHome|1499.00|INR|GST18|IN_STOCK|ACTIVE|Adjustable LED study lamp|/img/SKU1006.jpg|2026-10-12 09:41:39
+SKU1007|Bluetooth Headphones|CAT-ELE-ACC|SoundMax|1999.00|INR|GST18|IN_STOCK|INACTIVE|Over-ear Bluetooth headphones|/img/SKU1007.jpg|2026-10-13 11:00:00
+SKU1008|Travel Backpack|CAT-ACC-GEN|TrailMate|1799.00|INR|GST12|IN_STOCK|ACTIVE|Water-resistant travel backpack|/img/SKU1008.jpg|2026-10-12 09:41:39
+SKU1009|Ceramic Coffee Mug|CAT-HOM-LIT|DailySip|299.00|INR|GST12|IN_STOCK|ACTIVE|Ceramic mug for everyday use|/img/SKU1009.jpg|2026-10-12 09:41:39
+SKU1010|Mechanical Gaming Keyboard|CAT-ELE-ACC|GameCore|3299.00|INR|GST18|IN_STOCK|ACTIVE|Mechanical gaming keyboard with RGB lighting|/img/SKU1010.jpg|2026-10-13 11:00:00
+SKU1011|Smartphone Stand|CAT-ACC-GEN|FlexiTech|399.00|INR|GST18|IN_STOCK|ACTIVE|Adjustable smartphone stand|/img/SKU1011.jpg|2026-10-12 09:43:42
+SKU1012|USB-C Charging Cable|CAT-ELE-ACC|ChargePro|249.00|INR|GST18|IN_STOCK|ACTIVE|Durable USB-C charging cable|/img/SKU1012.jpg|2026-10-12 09:43:42
+SKU1013|Laptop Backpack|CAT-ACC-GEN|CarrySmart|2199.00|INR|GST12|IN_STOCK|ACTIVE|Padded backpack for laptops|/img/SKU1013.jpg|2026-10-12 09:43:42
+SKU1014|Portable Bluetooth Speaker|CAT-ELE-ACC|SoundWave|1599.00|INR|GST18|IN_STOCK|ACTIVE|Compact portable Bluetooth speaker|/img/SKU1014.jpg|2026-10-12 09:43:42
+SKU1015|Cotton Bedsheet Set|CAT-HOM-LIT|ComfortNest|1299.00|INR|GST5|IN_STOCK|ACTIVE|Soft cotton bedsheet set|/img/SKU1015.jpg|2026-10-12 09:43:42
+SKU1016|Sports Water Bottle|CAT-ACC-GEN|HydroFit|449.00|INR|GST12|IN_STOCK|ACTIVE|Lightweight sports water bottle|/img/SKU1016.jpg|2026-10-12 09:43:42
+SKU1017|Wireless Earbuds|CAT-ELE-ACC|AudioBeat|2299.00|INR|GST18|IN_STOCK|ACTIVE|Compact wireless earbuds|/img/SKU1017.jpg|2026-10-12 09:43:42
+SKU1018|Office Chair Cushion|CAT-HOM-LIT|ErgoComfort|699.00|INR|GST18|IN_STOCK|ACTIVE|Memory foam office chair cushion|/img/SKU1018.jpg|2026-10-12 09:43:42
+SKU1019|Men Running Shorts|CAT-APP-TOP|ActiveMove|599.00|INR|GST5|IN_STOCK|ACTIVE|Breathable sports running shorts|/img/SKU1019.jpg|2026-10-12 09:43:42
+SKU1020|Digital Alarm Clock|CAT-HOM-LIT|TimeEase|899.00|INR|GST18|IN_STOCK|ACTIVE|Digital alarm clock with LED display|/img/SKU1020.jpg|2026-10-12 09:43:42
+SKU1021|Classic Denim Jeans|CAT-APP-TOP|DenimCraft|1599.00|INR|GST5|IN_STOCK|ACTIVE|Comfort-fit denim jeans|/img/SKU1021.jpg|2026-10-12 09:44:59
+SKU1022|Running Sports Socks|CAT-APP-TOP|FitWear|249.00|INR|GST5|IN_STOCK|ACTIVE|Breathable sports socks|/img/SKU1022.jpg|2026-10-12 09:44:59
+SKU1023|Laptop Cooling Pad|CAT-ELE-ACC|CoolTech|1199.00|INR|GST18|IN_STOCK|ACTIVE|Laptop cooling pad with dual fans|/img/SKU1023.jpg|2026-10-12 09:44:59
+SKU1024|Power Bank 20000mAh|CAT-ELE-ACC|VoltMax|1999.00|INR|GST18|IN_STOCK|ACTIVE|Portable high-capacity power bank|/img/SKU1024.jpg|2026-10-12 09:44:59
+SKU1025|Ceramic Dinner Plate Set|CAT-HOM-LIT|TableCraft|999.00|INR|GST12|IN_STOCK|ACTIVE|Set of four ceramic dinner plates|/img/SKU1025.jpg|2026-10-12 09:44:59
+SKU1026|Foldable Umbrella|CAT-ACC-GEN|RainGuard|549.00|INR|GST12|IN_STOCK|ACTIVE|Compact foldable rain umbrella|/img/SKU1026.jpg|2026-10-12 09:44:59
+SKU1027|Electric Kettle|CAT-HOM-LIT|HeatWave|1499.00|INR|GST18|IN_STOCK|ACTIVE|Electric kettle with auto shut-off|/img/SKU1027.jpg|2026-10-12 09:44:59
+SKU1028|Gaming Mouse Pad|CAT-ELE-ACC|GameCore|499.00|INR|GST18|IN_STOCK|ACTIVE|Large non-slip gaming mouse pad|/img/SKU1028.jpg|2026-10-12 09:44:59
+SKU1029|Travel Neck Pillow|CAT-ACC-GEN|JourneyEase|699.00|INR|GST12|IN_STOCK|ACTIVE|Soft memory foam travel pillow|/img/SKU1029.jpg|2026-10-12 09:44:59
+SKU1030|Insulated Lunch Box|CAT-HOM-LIT|FreshCarry|799.00|INR|GST12|IN_STOCK|ACTIVE|Insulated lunch box for daily meals|/img/SKU1030.jpg|2026-10-12 09:44:59
+SKU1031|Formal Office Shirt|CAT-APP-TOP|PrimeStyle|1199.00|INR|GST5|IN_STOCK|ACTIVE|Slim-fit formal office shirt|/img/SKU1031.jpg|2026-10-12 09:48:40
+SKU1032|Casual Sneakers|CAT-FTW-FRM|StreetStep|1899.00|INR|GST18|IN_STOCK|ACTIVE|Everyday casual sneakers|/img/SKU1032.jpg|2026-10-12 09:48:40
+SKU1033|27-inch LED Monitor|CAT-ELE-ACC|ViewPoint|10499.00|INR|GST18|IN_STOCK|ACTIVE|Full HD LED computer monitor|/img/SKU1033.jpg|2026-10-13 11:00:00
+SKU1034|External SSD 1TB|CAT-ELE-ACC|DataDrive|6999.00|INR|GST18|IN_STOCK|ACTIVE|Portable 1TB solid-state drive|/img/SKU1034.jpg|2026-10-12 09:48:40
+SKU1035|Non-Stick Frying Pan|CAT-HOM-LIT|CookSmart|899.00|INR|GST12|IN_STOCK|ACTIVE|Non-stick frying pan for daily cooking|/img/SKU1035.jpg|2026-10-12 09:48:40
+SKU1036|Cotton Bath Towel|CAT-HOM-LIT|SoftTouch|449.00|INR|GST5|IN_STOCK|ACTIVE|Absorbent cotton bath towel|/img/SKU1036.jpg|2026-10-12 09:48:40
+SKU1037|Fitness Resistance Bands|CAT-ACC-GEN|FlexFit|599.00|INR|GST12|IN_STOCK|ACTIVE|Resistance bands for home workouts|/img/SKU1037.jpg|2026-10-12 09:48:40
+SKU1038|Smart LED Bulb|CAT-ELE-ACC|LumaSmart|699.00|INR|GST18|IN_STOCK|ACTIVE|Wi-Fi-enabled smart LED bulb|/img/SKU1038.jpg|2026-10-12 09:48:40
+SKU1039|Travel Suitcase|CAT-ACC-GEN|VoyagePro|3299.00|INR|GST18|IN_STOCK|ACTIVE|Lightweight wheeled travel suitcase|/img/SKU1039.jpg|2026-10-12 09:48:40
+SKU1040|Digital Kitchen Scale|CAT-HOM-LIT|MeasureMate|799.00|INR|GST18|IN_STOCK|ACTIVE|Digital scale for kitchen measurements|/img/SKU1040.jpg|2026-10-12 09:48:40
+SKU1041|Leather Wallet|CAT-ACC-GEN|UrbanCarry|899.00|INR|GST18|IN_STOCK|ACTIVE|Compact everyday leather wallet|/img/SKU1041.jpg|2026-10-12 09:51:14
+SKU1042|Running Track Pants|CAT-APP-TOP|ActiveMove|1099.00|INR|GST5|IN_STOCK|ACTIVE|Lightweight running track pants|/img/SKU1042.jpg|2026-10-12 09:51:14
+SKU1043|USB Desktop Microphone|CAT-ELE-ACC|VoicePro|2499.00|INR|GST18|IN_STOCK|ACTIVE|USB microphone for calls and recording|/img/SKU1043.jpg|2026-10-12 09:51:14
+SKU1044|Webcam Full HD|CAT-ELE-ACC|ClearView|1899.00|INR|GST18|IN_STOCK|ACTIVE|Full HD webcam for video meetings|/img/SKU1044.jpg|2026-10-12 09:51:14
+SKU1045|Floor Cleaning Mop|CAT-HOM-LIT|CleanNest|699.00|INR|GST12|IN_STOCK|ACTIVE|Microfiber floor cleaning mop|/img/SKU1045.jpg|2026-10-12 09:51:14
+SKU1046|Ceramic Flower Vase|CAT-HOM-LIT|DecorHaven|799.00|INR|GST12|IN_STOCK|ACTIVE|Decorative ceramic flower vase|/img/SKU1046.jpg|2026-10-12 09:51:14
+SKU1047|Basketball|CAT-SPT-GEN|CourtMaster|899.00|INR|GST12|IN_STOCK|ACTIVE|Durable basketball for outdoor play|/img/SKU1047.jpg|2026-10-12 09:51:14
+SKU1048|Badminton Racket|CAT-SPT-GEN|SmashPro|1499.00|INR|GST12|IN_STOCK|ACTIVE|Lightweight badminton racket|/img/SKU1048.jpg|2026-10-12 09:51:14
+SKU1049|Yoga Exercise Mat|CAT-SPT-GEN|ZenFit|999.00|INR|GST12|IN_STOCK|ACTIVE|Non-slip yoga exercise mat|/img/SKU1049.jpg|2026-10-12 09:51:14
+SKU1050|Adjustable Dumbbell Set|CAT-SPT-GEN|PowerLift|2999.00|INR|GST12|IN_STOCK|ACTIVE|Adjustable dumbbell set for home workouts|/img/SKU1050.jpg|2026-10-12 09:51:14
+SKU1051|Polarized Sunglasses|CAT-ACC-GEN|SunGuard|1299.00|INR|GST18|IN_STOCK|ACTIVE|Polarized sunglasses for outdoor use|/img/SKU1051.jpg|2026-10-12 09:58:29
+SKU1052|Winter Hoodie|CAT-APP-TOP|CozyWear|1499.00|INR|GST5|IN_STOCK|ACTIVE|Soft fleece winter hoodie|/img/SKU1052.jpg|2026-10-12 09:58:29
+SKU1053|Wireless Charging Pad|CAT-ELE-ACC|ChargePro|999.00|INR|GST18|IN_STOCK|ACTIVE|Wireless charging pad for compatible devices|/img/SKU1053.jpg|2026-10-12 09:58:29
+SKU1054|Portable Projector|CAT-ELE-ACC|ViewPoint|9499.00|INR|GST18|IN_STOCK|ACTIVE|Compact projector for presentations|/img/SKU1054.jpg|2026-10-13 11:00:00
+SKU1055|Pressure Cooker 5L|CAT-HOM-LIT|CookSmart|2199.00|INR|GST12|IN_STOCK|ACTIVE|Five-litre pressure cooker for daily cooking|/img/SKU1055.jpg|2026-10-12 09:58:29
+SKU1056|Electric Toothbrush|CAT-PER-CAR|SmilePlus|1599.00|INR|GST18|IN_STOCK|ACTIVE|Rechargeable electric toothbrush|/img/SKU1056.jpg|2026-10-12 09:58:29
+SKU1057|Football Size 5|CAT-SPT-GEN|GoalStrike|899.00|INR|GST12|IN_STOCK|ACTIVE|Durable size 5 football|/img/SKU1057.jpg|2026-10-12 09:58:29
+SKU1058|Tennis Racket|CAT-SPT-GEN|CourtMaster|2499.00|INR|GST12|IN_STOCK|ACTIVE|Lightweight tennis racket for training|/img/SKU1058.jpg|2026-10-12 09:58:29
+SKU1059|Garden Watering Can|CAT-HOM-LIT|GreenNest|399.00|INR|GST12|IN_STOCK|ACTIVE|Lightweight watering can for plants|/img/SKU1059.jpg|2026-10-12 09:58:29
+SKU1060|Desk Organizer|CAT-HOM-LIT|WorkSpace|549.00|INR|GST18|IN_STOCK|ACTIVE|Multi-compartment desk organizer|/img/SKU1060.jpg|2026-10-12 09:58:29
+SKU1061|Graphic Print T-Shirt|CAT-APP-TOP|UrbanWear|699.00|INR|GST5|IN_STOCK|ACTIVE|Cotton T-shirt with graphic print|/img/SKU1061.jpg|2026-10-12 10:03:41
+SKU1062|Leather Formal Shoes|CAT-FTW-FRM|PrimeStep|2899.00|INR|GST18|IN_STOCK|ACTIVE|Classic leather formal shoes|/img/SKU1062.jpg|2026-10-12 10:03:41
+SKU1063|USB Flash Drive 128GB|CAT-ELE-ACC|DataDrive|899.00|INR|GST18|IN_STOCK|ACTIVE|High-speed 128GB USB flash drive|/img/SKU1063.jpg|2026-10-12 10:03:41
+SKU1064|Smart Fitness Band|CAT-ELE-ACC|FitTrack|2499.00|INR|GST18|IN_STOCK|ACTIVE|Fitness band with activity tracking|/img/SKU1064.jpg|2026-10-12 10:03:41
+SKU1065|Electric Hand Blender|CAT-HOM-LIT|CookSmart|1299.00|INR|GST18|IN_STOCK|ACTIVE|Hand blender for everyday cooking|/img/SKU1065.jpg|2026-10-12 10:03:41
+SKU1066|Cotton Pillow Covers|CAT-HOM-LIT|ComfortNest|349.00|INR|GST5|IN_STOCK|ACTIVE|Pair of soft cotton pillow covers|/img/SKU1066.jpg|2026-10-12 10:03:41
+SKU1067|Volleyball|CAT-SPT-GEN|CourtMaster|799.00|INR|GST12|IN_STOCK|ACTIVE|Durable volleyball for training and recreation|/img/SKU1067.jpg|2026-10-12 10:03:41
+SKU1068|Cycling Helmet|CAT-SPT-GEN|RideSafe|1599.00|INR|GST18|IN_STOCK|ACTIVE|Lightweight protective cycling helmet|/img/SKU1068.jpg|2026-10-12 10:03:41
+SKU1069|Wall Clock|CAT-HOM-LIT|TimeEase|649.00|INR|GST12|IN_STOCK|ACTIVE|Modern wall clock for home interiors|/img/SKU1069.jpg|2026-10-12 10:03:41
+SKU1070|Rechargeable Desk Fan|CAT-HOM-LIT|BreezeTech|1199.00|INR|GST18|IN_STOCK|ACTIVE|Compact rechargeable desk fan|/img/SKU1070.jpg|2026-10-12 10:03:41
+SKU1071|Casual Polo T-Shirt|CAT-APP-TOP|PrimeStyle|799.00|INR|GST5|IN_STOCK|ACTIVE|Classic cotton polo T-shirt|/img/SKU1071.jpg|2026-10-12 10:07:23
+SKU1072|Hiking Shoes|CAT-FTW-FRM|TrailMate|3299.00|INR|GST18|IN_STOCK|ACTIVE|Durable shoes for hiking and outdoor trails|/img/SKU1072.jpg|2026-10-12 10:07:23
+SKU1073|Laptop Wireless Mouse|CAT-ELE-ACC|ClickTech|999.00|INR|GST18|IN_STOCK|ACTIVE|Wireless mouse for laptops and desktops|/img/SKU1073.jpg|2026-10-12 10:07:23
+SKU1074|Smartphone Fast Charger|CAT-ELE-ACC|ChargePro|1199.00|INR|GST18|IN_STOCK|ACTIVE|Fast charger for compatible smartphones|/img/SKU1074.jpg|2026-10-12 10:07:23
+SKU1075|Non-Slip Door Mat|CAT-HOM-LIT|CleanNest|399.00|INR|GST12|IN_STOCK|ACTIVE|Non-slip mat for entrance areas|/img/SKU1075.jpg|2026-10-12 10:07:23
+SKU1076|Storage Container Set|CAT-HOM-LIT|FreshCarry|699.00|INR|GST12|IN_STOCK|ACTIVE|Reusable kitchen storage containers|/img/SKU1076.jpg|2026-10-12 10:07:23
+SKU1077|Cricket Bat|CAT-SPT-GEN|PowerPlay|1899.00|INR|GST12|IN_STOCK|ACTIVE|Cricket bat for recreational play|/img/SKU1077.jpg|2026-10-12 10:07:23
+SKU1078|Skipping Rope|CAT-SPT-GEN|FlexFit|299.00|INR|GST12|IN_STOCK|ACTIVE|Adjustable skipping rope for fitness training|/img/SKU1078.jpg|2026-10-12 10:07:23
+SKU1079|Bedside Table Lamp|CAT-HOM-LIT|BrightHome|1099.00|INR|GST18|IN_STOCK|ACTIVE|Compact lamp for bedside tables|/img/SKU1079.jpg|2026-10-12 10:07:23
+SKU1080|Air Purifier|CAT-HOM-LIT|BreezeTech|4999.00|INR|GST18|OUT_OF_STOCK|ACTIVE|Compact air purifier for indoor spaces|/img/SKU1080.jpg|2026-10-13 11:00:00
+SKU1081|Checked Casual Shirt|CAT-APP-TOP|UrbanWear|999.00|INR|GST5|IN_STOCK|ACTIVE|Casual checked cotton shirt|/img/SKU1081.jpg|2026-10-12 10:09:22
+SKU1082|Walking Shoes|CAT-FTW-FRM|SpeedStep|2199.00|INR|GST18|IN_STOCK|ACTIVE|Comfortable shoes for everyday walking|/img/SKU1082.jpg|2026-10-12 10:09:22
+SKU1083|Mechanical Gaming Mouse|CAT-ELE-ACC|GameCore|1799.00|INR|GST18|IN_STOCK|ACTIVE|Gaming mouse with adjustable sensitivity|/img/SKU1083.jpg|2026-10-12 10:09:22
+SKU1084|Bluetooth USB Adapter|CAT-ELE-ACC|ConnectPro|499.00|INR|GST18|IN_STOCK|ACTIVE|USB adapter for Bluetooth connectivity|/img/SKU1084.jpg|2026-10-12 10:09:22
+SKU1085|Electric Rice Cooker|CAT-HOM-LIT|CookSmart|2499.00|INR|GST18|IN_STOCK|ACTIVE|Electric rice cooker for everyday meals|/img/SKU1085.jpg|2026-10-12 10:09:22
+SKU1086|Cotton Hand Towels Set|CAT-HOM-LIT|SoftTouch|349.00|INR|GST5|IN_STOCK|ACTIVE|Set of soft cotton hand towels|/img/SKU1086.jpg|2026-10-12 10:09:22
+SKU1087|Badminton Shuttlecocks Pack|CAT-SPT-GEN|SmashPro|399.00|INR|GST12|IN_STOCK|ACTIVE|Pack of shuttlecocks for badminton practice|/img/SKU1087.jpg|2026-10-12 10:09:22
+SKU1088|Football Training Cones|CAT-SPT-GEN|GoalStrike|499.00|INR|GST12|IN_STOCK|ACTIVE|Training cones for football drills|/img/SKU1088.jpg|2026-10-12 10:09:22
+SKU1089|Wall-Mounted Bookshelf|CAT-HOM-LIT|DecorHaven|1899.00|INR|GST12|IN_STOCK|ACTIVE|Compact wall-mounted bookshelf|/img/SKU1089.jpg|2026-10-12 10:09:22
+SKU1090|Rechargeable Emergency Light|CAT-HOM-LIT|BrightHome|999.00|INR|GST18|IN_STOCK|ACTIVE|Rechargeable light for power outages|/img/SKU1090.jpg|2026-10-12 10:09:22
+SKU1091|Premium Cotton Hoodie|CAT-APP-TOP|CozyWear|1799.00|INR|GST5|IN_STOCK|ACTIVE|Premium cotton hoodie for everyday wear|/img/SKU1091.jpg|2026-10-12 10:10:48
+SKU1092|Sports Running Shoes|CAT-FTW-FRM|SpeedStep|2799.00|INR|GST18|IN_STOCK|ACTIVE|Lightweight running shoes for sports|/img/SKU1092.jpg|2026-10-12 10:10:48
+SKU1093|Portable Laptop Stand|CAT-ACC-GEN|FlexiTech|999.00|INR|GST18|IN_STOCK|ACTIVE|Adjustable stand for laptops|/img/SKU1093.jpg|2026-10-12 10:10:48
+SKU1094|Smart Wi-Fi Router|CAT-ELE-ACC|ConnectPro|2499.00|INR|GST18|IN_STOCK|ACTIVE|Dual-band Wi-Fi router for home use|/img/SKU1094.jpg|2026-10-12 10:10:48
+SKU1095|Stainless Steel Cookware Set|CAT-HOM-LIT|CookSmart|3499.00|INR|GST12|IN_STOCK|ACTIVE|Stainless steel cookware set for daily cooking|/img/SKU1095.jpg|2026-10-12 10:10:48
+SKU1096|Digital Bathroom Scale|CAT-PER-CAR|MeasureMate|1199.00|INR|GST18|IN_STOCK|ACTIVE|Digital weighing scale for home use|/img/SKU1096.jpg|2026-10-12 10:10:48
+SKU1097|Cricket Practice Stumps|CAT-SPT-GEN|PowerPlay|699.00|INR|GST12|IN_STOCK|ACTIVE|Practice stumps for cricket training|/img/SKU1097.jpg|2026-10-12 10:10:48
+SKU1098|Cycling Water Bottle Holder|CAT-SPT-GEN|RideSafe|449.00|INR|GST12|IN_STOCK|ACTIVE|Lightweight bottle holder for bicycles|/img/SKU1098.jpg|2026-10-12 10:10:48
+SKU1099|Decorative Wall Shelf|CAT-HOM-LIT|DecorHaven|1299.00|INR|GST12|IN_STOCK|ACTIVE|Modern decorative shelf for home interiors|/img/SKU1099.jpg|2026-10-12 10:10:48
+SKU1100|Rechargeable Table Lamp|CAT-HOM-LIT|BrightHome|1399.00|INR|GST18|IN_STOCK|ACTIVE|Rechargeable LED table lamp for study and work|/img/SKU1100.jpg|2026-10-12 10:10:48
+SKU1101|Wireless Noise-Cancelling Headphones|CAT-ELE-ACC|AudioBeat|4299.00|INR|GST18|IN_STOCK|ACTIVE|Over-ear headphones with noise cancellation|/img/SKU1101.jpg|2026-10-13 11:00:00
+SKU1102|Insulated Travel Tumbler|CAT-HOM-LIT|AquaLife|799.00|INR|GST12|IN_STOCK|ACTIVE|Reusable tumbler for hot and cold drinks|/img/SKU1102.jpg|2026-10-13 11:00:00
+SKU1103|Ergonomic Office Keyboard|CAT-ELE-ACC|KeyPro|1899.00|INR|GST18|IN_STOCK|ACTIVE|Ergonomic keyboard for office work|/img/SKU1103.jpg|2026-10-13 11:00:00
+SKU1104|Quick-Dry Sports Towel|CAT-SPT-GEN|ActiveMove|499.00|INR|GST5|IN_STOCK|ACTIVE|Lightweight towel for workouts and travel|/img/SKU1104.jpg|2026-10-13 11:00:00
+SKU1105|USB-C Hub 7-in-1|CAT-ELE-ACC|ConnectPro|2499.00|INR|GST18|IN_STOCK|ACTIVE|Multiport USB-C hub for laptops|/img/SKU1105.jpg|2026-10-13 11:00:00
+SKU1106|Foldable Laptop Table|CAT-HOM-LIT|WorkSpace|1599.00|INR|GST18|IN_STOCK|ACTIVE|Compact foldable table for laptop use|/img/SKU1106.jpg|2026-10-13 11:00:00
+SKU1107|Classic Canvas Tote Bag|CAT-ACC-GEN|UrbanCarry|399.00|INR|GST5|IN_STOCK|ACTIVE|Reusable canvas tote bag for daily use|/img/SKU1107.jpg|2026-10-13 11:00:00
+SKU1108|Smart Plug|CAT-ELE-ACC|LumaSmart|1199.00|INR|GST18|IN_STOCK|ACTIVE|Wi-Fi smart plug with app control|/img/SKU1108.jpg|2026-10-13 11:00:00
+SKU1109|Ceramic Soup Bowl Set|CAT-HOM-LIT|TableCraft|899.00|INR|GST12|OUT_OF_STOCK|ACTIVE|Set of two ceramic soup bowls|/img/SKU1109.jpg|2026-10-13 11:00:00
+SKU1110|Reflective Running Vest|CAT-SPT-GEN|RideSafe|699.00|INR|GST5|IN_STOCK|ACTIVE|Lightweight reflective vest for evening runs|/img/SKU1110.jpg|2026-10-13 11:00:00

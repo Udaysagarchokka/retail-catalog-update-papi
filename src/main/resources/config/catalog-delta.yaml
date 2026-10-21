@@ -1,0 +1,48 @@
+# Delta Classification Rules & Thresholds
+hashFields:
+  - productName
+  - categoryCode
+  - brand
+  - price
+  - currency
+  - taxClass
+  - stockStatus
+  - productStatus
+  - shortDescription
+  - imagePath
+
+customerFacingFields:
+  - productName
+  - price
+  - stockStatus
+  - productStatus
+  - shortDescription
+  - imagePath
+
+internalOnlyFields:
+  - taxClass
+  - categoryCode
+  - brand
+
+priceGuard:
+  maxIncreasePercent: "50"
+  maxDecreasePercent: "40"
+  action: "HOLD_FOR_REVIEW"
+
+fullExtractPolicy:
+  missingProductAction: "MARK_DELISTED"
+  requireMinimumRecordCount: "5"
+
+invalidation:
+  pathTemplates:
+    - "/p/{sku}"
+    - "/p/{sku}/images"
+    - "/c/{categoryCode}"
+  maxPathsPerRequest: "30"
+  maxRequestsPerMinute: "60"
+  maxRetryAttempts: "3"
+  backoffMillis: "2000"
+
+processing:
+  batchSize: "10"
+  maxRejectPercentAllowed: "5"

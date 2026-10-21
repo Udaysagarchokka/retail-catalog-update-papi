@@ -1,0 +1,373 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core    http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/db      http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ================================================================
+         PERSIST PRODUCT RECORD SUBFLOW
+         Handles: NEW â†’ INSERT  |  CHANGED_* â†’ UPDATE  |  HOLD_FOR_REVIEW â†’ flag
+         C1 FIX: history rows built via map-history-records.dwl
+         H3 FIX: all DB writes wrapped in until-successful (transient retry)
+         ================================================================ -->
+    <sub-flow name="persist-product-record-subflow" doc:name="Persist Product Record Subflow">
+        <choice doc:name="Classification Switch">
+
+            <!-- 1. NEW â€” INSERT product and write single 'NEW' history row -->
+            <when expression="#[vars.deltaClassification.classification == 'NEW']">
+                <!-- Save SKU before INSERT overwrites payload -->
+                <set-variable variableName="currentSku" value="#[payload.sku]" doc:name="Save SKU before INSERT" />
+                <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                  doc:name="Retry Insert New Product">
+                    <db:insert doc:name="Insert New Product" config-ref="Database_Config">
+                        <db:sql><![CDATA[INSERT INTO products
+                            (sku, product_name, category_code, brand, price, currency,
+                             tax_class, stock_status, product_status, short_description,
+                             image_path, content_hash, source_updated_at, last_run_id, review_hold)
+                            VALUES
+                            (:sku, :productName, :categoryCode, :brand, :price, :currency,
+                             :taxClass, :stockStatus, :productStatus, :shortDescription,
+                             :imagePath, :contentHash, :sourceUpdatedAt, :runId, FALSE)]]></db:sql>
+                        <db:input-parameters><![CDATA[#[{
+    sku:              vars.currentSku,
+    productName:      payload.productName,
+    categoryCode:     payload.categoryCode,
+    brand:            payload.brand,
+    price:            payload.price as Number,
+    currency:         payload.currency,
+    taxClass:         payload.taxClass,
+    stockStatus:      payload.stockStatus,
+    productStatus:    payload.productStatus,
+    shortDescription: payload.shortDescription,
+    imagePath:        payload.imagePath,
+    contentHash:      vars.computedHash,
+    sourceUpdatedAt:  payload.updatedAt default null,
+    runId:            vars.runId
+}]]]></db:input-parameters>
+                    </db:insert>
+                </until-successful>
+
+                <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                  doc:name="Retry Insert New Product History">
+                    <db:insert doc:name="Insert New Product History" config-ref="Database_Config">
+                        <db:sql><![CDATA[INSERT INTO product_change_history
+                            (run_id, sku, change_type, field_name, new_value, customer_facing)
+                            VALUES (:runId, :sku, 'NEW', 'ALL', 'NEW_PRODUCT', TRUE)]]></db:sql>
+                        <db:input-parameters><![CDATA[#[{ runId: vars.runId, sku: vars.currentSku }]]]></db:input-parameters>
+                    </db:insert>
+                </until-successful>
+            </when>
+
+            <!-- 2. CHANGED (customer-facing or internal) â€” UPDATE product,
+                 then map diffs to history rows via map-history-records.dwl -->
+            <when expression="#[vars.deltaClassification.classification == 'CHANGED_CUSTOMER_FACING' or vars.deltaClassification.classification == 'CHANGED_INTERNAL_ONLY']">
+                <set-variable variableName="currentSku" value="#[payload.sku]" doc:name="Save SKU before UPDATE" />
+
+                <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                  doc:name="Retry Update Changed Product">
+                    <db:update doc:name="Update Changed Product" config-ref="Database_Config">
+                        <db:sql><![CDATA[UPDATE products
+                            SET product_name      = :productName,
+                                category_code     = :categoryCode,
+                                brand             = :brand,
+                                price             = :price,
+                                currency          = :currency,
+                                tax_class         = :taxClass,
+                                stock_status      = :stockStatus,
+                                product_status    = :productStatus,
+                                short_description = :shortDescription,
+                                image_path        = :imagePath,
+                                content_hash      = :contentHash,
+                                source_updated_at = :sourceUpdatedAt,
+                                last_run_id       = :runId,
+                                review_hold       = FALSE,
+                                updated_at        = CURRENT_TIMESTAMP
+                            WHERE sku = :sku]]></db:sql>
+                        <db:input-parameters><![CDATA[#[{
+    sku:              vars.currentSku,
+    productName:      payload.productName,
+    categoryCode:     payload.categoryCode,
+    brand:            payload.brand,
+    price:            payload.price as Number,
+    currency:         payload.currency,
+    taxClass:         payload.taxClass,
+    stockStatus:      payload.stockStatus,
+    productStatus:    payload.productStatus,
+    shortDescription: payload.shortDescription,
+    imagePath:        payload.imagePath,
+    contentHash:      vars.computedHash,
+    sourceUpdatedAt:  payload.updatedAt default null,
+    runId:            vars.runId
+}]]]></db:input-parameters>
+                    </db:update>
+                </until-successful>
+
+                <!-- C1 FIX: map diffs to history row objects via external DWL -->
+                <ee:transform doc:name="Map Diffs to History Rows â€” calls map-history-records.dwl">
+                    <ee:variables>
+                        <ee:set-variable variableName="historyRows"><![CDATA[%dw 2.0
+output application/java
+var runId      = vars.runId default "RUN-DEFAULT"
+var sku        = vars.currentRecord.sku default "UNKNOWN"
+var changeType = vars.deltaClassification.classification default "CHANGED"
+---
+vars.deltaClassification.diffs map ((diff) -> {
+    run_id:          runId,
+    sku:             sku,
+    change_type:     changeType,
+    field_name:      diff.fieldName,
+    old_value:       if (diff.oldValue != null) (diff.oldValue as String) else null,
+    new_value:       if (diff.newValue != null) (diff.newValue as String) else null,
+    customer_facing: diff.customerFacing default false
+})]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+
+                <!-- Write each diff as a separate history row -->
+                <foreach collection="#[vars.historyRows]" doc:name="For Each History Row">
+                    <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                      doc:name="Retry Insert Field History">
+                        <db:insert doc:name="Insert Field History" config-ref="Database_Config">
+                            <db:sql><![CDATA[INSERT INTO product_change_history
+                                (run_id, sku, change_type, field_name, old_value, new_value, customer_facing)
+                                VALUES (:runId, :sku, :changeType, :fieldName, :oldValue, :newValue, :customerFacing)]]></db:sql>
+                            <db:input-parameters><![CDATA[#[{
+    runId:          payload.run_id,
+    sku:            payload.sku,
+    changeType:     payload.change_type,
+    fieldName:      payload.field_name,
+    oldValue:       payload.old_value,
+    newValue:       payload.new_value,
+    customerFacing: payload.customer_facing
+}]]]></db:input-parameters>
+                        </db:insert>
+                    </until-successful>
+                </foreach>
+            </when>
+
+            <!-- 3. HOLD_FOR_REVIEW â€” flag review_hold, price NOT changed -->
+            <when expression="#[vars.deltaClassification.classification == 'HOLD_FOR_REVIEW']">
+                <set-variable variableName="currentSku" value="#[payload.sku]" doc:name="Save SKU before HOLD UPDATE" />
+                <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                  doc:name="Retry Flag Review Hold">
+                    <db:update doc:name="Flag Review Hold On Product" config-ref="Database_Config">
+                        <db:sql><![CDATA[UPDATE products
+                            SET review_hold = TRUE,
+                                last_run_id = :runId,
+                                updated_at  = CURRENT_TIMESTAMP
+                            WHERE sku = :sku]]></db:sql>
+                        <db:input-parameters><![CDATA[#[{ sku: vars.currentSku, runId: vars.runId }]]]></db:input-parameters>
+                    </db:update>
+                </until-successful>
+
+                <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                  doc:name="Retry Insert Price Guard History">
+                    <db:insert doc:name="Insert Price Guard History Row" config-ref="Database_Config">
+                        <db:sql><![CDATA[INSERT INTO product_change_history
+                            (run_id, sku, change_type, field_name, old_value, new_value, customer_facing)
+                            VALUES (:runId, :sku, 'HOLD_FOR_REVIEW', 'price', :oldVal, :newVal, FALSE)]]></db:sql>
+                        <db:input-parameters><![CDATA[#[{
+    runId:  vars.runId,
+    sku:    vars.currentSku,
+    oldVal: vars.storedProduct.price as String,
+    newVal: payload.price as String
+}]]]></db:input-parameters>
+                    </db:insert>
+                </until-successful>
+            </when>
+
+        </choice>
+    </sub-flow>
+
+    <!-- ================================================================
+         FULL EXTRACT DELISTING SUBFLOW
+         Marks active products absent from the run as DELISTED.
+         Never physically deletes rows (PDF requirement).
+         ================================================================ -->
+    <sub-flow name="evaluate-full-extract-delisting-subflow"
+              doc:name="Evaluate Full Extract Delisting Subflow">
+        <choice doc:name="Is Full Extract?">
+            <when expression="#[vars.extractType == 'FULL']">
+                <logger level="INFO" doc:name="Log Delist Check Start"
+                        message="#['DELIST_CHECK_START RunId=' ++ vars.runId]" />
+
+                <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                  doc:name="Retry Find Absent Products">
+                    <db:select doc:name="Find Absent Active Products" config-ref="Database_Config"
+                               target="omittedProducts">
+                        <db:sql><![CDATA[SELECT sku, category_code FROM products
+                                         WHERE product_status = 'ACTIVE'
+                                         AND (last_run_id IS NULL OR last_run_id != :runId)]]></db:sql>
+                        <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+                    </db:select>
+                </until-successful>
+
+                <choice doc:name="Any Products to Delist?">
+                    <when expression="#[!isEmpty(vars.omittedProducts)]">
+                        <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                          doc:name="Retry Mark Products Delisted">
+                            <db:update doc:name="Mark Products Delisted" config-ref="Database_Config">
+                                <db:sql><![CDATA[UPDATE products
+                                                 SET product_status = 'DELISTED',
+                                                     last_run_id    = :runId,
+                                                     updated_at     = CURRENT_TIMESTAMP
+                                                 WHERE product_status = 'ACTIVE'
+                                                 AND (last_run_id IS NULL OR last_run_id != :runId)]]></db:sql>
+                                <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+                            </db:update>
+                        </until-successful>
+
+                        <logger level="INFO" doc:name="Log Delist Count"
+                                message="#['DELISTED ' ++ sizeOf(vars.omittedProducts) ++ ' products for RunId=' ++ vars.runId]" />
+
+                        <!-- Write one history row per delisted product -->
+                        <foreach collection="#[vars.omittedProducts]" doc:name="Log Delist History per SKU">
+                            <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                              doc:name="Retry Insert Delist History">
+                                <db:insert doc:name="Insert Delisted History Row" config-ref="Database_Config">
+                                    <db:sql><![CDATA[INSERT INTO product_change_history
+                                        (run_id, sku, change_type, field_name, old_value, new_value, customer_facing)
+                                        VALUES (:runId, :sku, 'DELISTED', 'productStatus', 'ACTIVE', 'DELISTED', TRUE)]]></db:sql>
+                                    <db:input-parameters><![CDATA[#[{ runId: vars.runId, sku: vars.currentSku }]]]></db:input-parameters>
+                                </db:insert>
+                            </until-successful>
+                        </foreach>
+                    </when>
+                    <otherwise>
+                        <logger level="INFO" doc:name="Log No Delisting Needed"
+                                message="#['No products to delist for RunId=' ++ vars.runId]" />
+                    </otherwise>
+                </choice>
+            </when>
+        </choice>
+    </sub-flow>
+
+    <!-- ================================================================
+         FINALIZE RUN AUDIT METRICS SUBFLOW
+         Aggregates all audit columns from product_change_history and
+         cdn_invalidations, derives unchanged_count, writes COMPLETED row.
+         ================================================================ -->
+    <sub-flow name="finalize-catalog-import-run-subflow"
+              doc:name="Finalize Catalog Import Run Subflow">
+
+        <!-- Change-type counts from history -->
+        <db:select doc:name="Aggregate History Counts" config-ref="Database_Config"
+                   target="runMetrics">
+            <db:sql><![CDATA[SELECT
+                COUNT(DISTINCT CASE WHEN change_type = 'NEW'                                                THEN sku END) AS new_count,
+                COUNT(DISTINCT CASE WHEN change_type IN ('CHANGED_CUSTOMER_FACING','CHANGED_INTERNAL_ONLY') THEN sku END) AS changed_count,
+                COUNT(DISTINCT CASE WHEN change_type = 'HOLD_FOR_REVIEW'                                   THEN sku END) AS held_count,
+                COUNT(DISTINCT CASE WHEN change_type = 'DELISTED'                                          THEN sku END) AS delisted_count
+            FROM product_change_history WHERE run_id = :runId]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+        </db:select>
+
+        <!-- CDN invalidation counts -->
+        <db:select doc:name="Aggregate Invalidation Counts" config-ref="Database_Config"
+                   target="invMetrics">
+            <db:sql><![CDATA[SELECT
+                COUNT(*)                                                                   AS invalidation_requests,
+                COALESCE(SUM(path_count), 0)                                               AS invalidation_paths,
+                COALESCE(SUM(CASE WHEN confirmed = FALSE THEN path_count ELSE 0 END), 0)  AS unconfirmed_paths
+            FROM cdn_invalidations WHERE run_id = :runId]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+        </db:select>
+
+        <!-- Fetch parsed_count and rejected_count written by on-complete -->
+        <db:select doc:name="Fetch Parsed and Rejected Counts" config-ref="Database_Config"
+                   target="parsedRow">
+            <db:sql><![CDATA[SELECT
+                COALESCE(parsed_count,   0) AS parsed_count,
+                COALESCE(rejected_count, 0) AS rejected_count
+            FROM catalog_import_runs WHERE run_id = :runId]]></db:sql>
+            <db:input-parameters><![CDATA[#[{ runId: vars.runId }]]]></db:input-parameters>
+        </db:select>
+
+        <!-- Derive unchanged_count = parsed - new - changed - held -->
+        <ee:transform doc:name="Derive Unchanged Count">
+            <ee:variables>
+                <ee:set-variable variableName="derivedCounts"><![CDATA[%dw 2.0
+output application/java
+var parsed    = (vars.parsedRow[0].parsed_count   default 0) as Number
+var rejected  = (vars.parsedRow[0].rejected_count default 0) as Number
+var newC      = (vars.runMetrics[0].new_count     default 0) as Number
+var changed   = (vars.runMetrics[0].changed_count default 0) as Number
+var held      = (vars.runMetrics[0].held_count    default 0) as Number
+var unchanged = (if ((parsed - newC - changed - held - rejected) > 0) (parsed - newC - changed - held - rejected) else 0) as Number
+---
+{
+    parsedCount:   parsed,
+    rejectedCount: rejected,
+    unchangedCount: unchanged
+}]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- Write ALL 10 audit columns + COMPLETED -->
+        <db:update doc:name="Finalize Run Record â€” All Audit Columns" config-ref="Database_Config">
+            <db:sql><![CDATA[UPDATE catalog_import_runs
+                             SET new_count             = :newCount,
+                                 changed_count         = :changedCount,
+                                 held_count            = :heldCount,
+                                 delisted_count        = :delistedCount,
+                                 parsed_count          = :parsedCount,
+                                 unchanged_count       = :unchangedCount,
+                                 rejected_count        = :rejectedCount,
+                                 invalidation_requests = :invRequests,
+                                 invalidation_paths    = :invPaths,
+                                 unconfirmed_paths     = :unconfirmedPaths,
+                                 run_status            = 'COMPLETED',
+                                 completed_at          = CURRENT_TIMESTAMP
+                             WHERE run_id = :runId]]></db:sql>
+            <db:input-parameters><![CDATA[#[{
+    runId:             vars.runId,
+    newCount:          vars.runMetrics[0].new_count             default 0,
+    changedCount:      vars.runMetrics[0].changed_count         default 0,
+    heldCount:         vars.runMetrics[0].held_count            default 0,
+    delistedCount:     vars.runMetrics[0].delisted_count        default 0,
+    parsedCount:       vars.derivedCounts.parsedCount,
+    unchangedCount:    vars.derivedCounts.unchangedCount,
+    rejectedCount:     vars.derivedCounts.rejectedCount,
+    invRequests:       vars.invMetrics[0].invalidation_requests default 0,
+    invPaths:          vars.invMetrics[0].invalidation_paths    default 0,
+    unconfirmedPaths:  vars.invMetrics[0].unconfirmed_paths     default 0
+}]]]></db:input-parameters>
+        </db:update>
+
+        <logger level="INFO" doc:name="Log Run Finalized"
+                message="#['RUN_COMPLETED RunId=' ++ vars.runId
+                    ++ ' | Parsed='     ++ vars.derivedCounts.parsedCount
+                    ++ ' New='          ++ (vars.runMetrics[0].new_count     default 0)
+                    ++ ' Changed='      ++ (vars.runMetrics[0].changed_count default 0)
+                    ++ ' Unchanged='    ++ vars.derivedCounts.unchangedCount
+                    ++ ' Held='         ++ (vars.runMetrics[0].held_count    default 0)
+                    ++ ' Rejected='     ++ vars.derivedCounts.rejectedCount
+                    ++ ' Delisted='     ++ (vars.runMetrics[0].delisted_count default 0)
+                    ++ ' InvReqs='      ++ (vars.invMetrics[0].invalidation_requests default 0)
+                    ++ ' InvPaths='     ++ (vars.invMetrics[0].invalidation_paths    default 0)
+                    ++ ' Unconfirmed='  ++ (vars.invMetrics[0].unconfirmed_paths     default 0)]" />
+
+        <!-- ALERT: implausibly high change volume (>80% of parsed) -->
+        <choice doc:name="Alert High Change Volume?">
+            <when expression="#[vars.derivedCounts.parsedCount > 0 and ((vars.runMetrics[0].changed_count default 0) / vars.derivedCounts.parsedCount) > 0.8]">
+                <logger level="WARN" doc:name="Alert High Change Volume"
+                        message="#['ALERT_HIGH_CHANGE_VOLUME RunId=' ++ vars.runId ++ ' â€” ' ++ (vars.runMetrics[0].changed_count default 0) ++ '/' ++ vars.derivedCounts.parsedCount ++ ' records changed (>80%). Likely a hash or formatting issue.']" />
+            </when>
+        </choice>
+
+        <!-- ALERT: unconfirmed invalidations -->
+        <choice doc:name="Alert Unconfirmed Invalidations?">
+            <when expression="#[(vars.invMetrics[0].unconfirmed_paths default 0) > 0]">
+                <logger level="WARN" doc:name="Alert Unconfirmed Invalidations"
+                        message="#['ALERT_UNCONFIRMED_INVALIDATIONS RunId=' ++ vars.runId ++ ' â€” ' ++ (vars.invMetrics[0].unconfirmed_paths default 0) ++ ' path(s) unconfirmed. Stale CDN content possible.']" />
+            </when>
+        </choice>
+    </sub-flow>
+
+</mule>
+

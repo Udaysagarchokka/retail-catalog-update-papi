@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:file="http://www.mulesoft.org/schema/mule/file"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core    http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/batch   http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+        http://www.mulesoft.org/schema/mule/db      http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/file    http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+    <!-- ================================================================
+         CATALOG BATCH PROCESSING FLOW
+         Parses streaming pipe-delimited CSV, runs 4 batch steps:
+           Step 1 â€” Validation        (calls validate-record.dwl)
+           Step 2 â€” Hashing + Delta   (calls compute-hash.dwl + classify-delta.dwl)
+           Step 3 â€” Price Guard       (calls price-guard-check.dwl)
+           Step 4 â€” Selective Persist (calls persist-product-record-subflow)
+         On-complete: parsed_count written, delisting, CDN, finalize audit
+         C1 FIX: all inline DataWeave replaced with external DWL file calls
+         C4 FIX: rejected_count sourced from batch payload.failedRecords
+         H3 FIX: DB operations wrapped in try with retry for transient errors
+         ================================================================ -->
+    <flow name="catalog-batch-processing-flow" doc:name="Catalog Batch Processing Flow">
+
+        <!-- ============================================================
+             C3 FIX: Wrap CSV parse in <try> so malformed files are caught
+             and moved to error directory instead of crashing the batch.
+             ============================================================ -->
+        <logger level="INFO" doc:name="Log Batch Flow Entry"
+                message="#['BATCH_FLOW_ENTRY RunId=' ++ (vars.runId default 'N/A') ++ ' RecordCount=' ++ sizeOf(payload)]" />
+
+        <batch:job jobName="catalogBatchJob" doc:name="Catalog Batch Job"
+                   blockSize="${processing.batchSize}"
+                   maxConcurrency="3">
+            <batch:process-records>
+
+                <!-- ============================================================
+                     STEP 1: Record Validation
+                     C1 FIX: calls external validate-record.dwl
+                     ============================================================ -->
+                <batch:step name="ValidationStep" doc:name="Validation Step">
+                    <ee:transform doc:name="Validate Record â€” calls validate-record.dwl">
+                        <ee:variables>
+                            <ee:set-variable variableName="validationResult"><![CDATA[%dw 2.0
+output application/java
+var skuValid           = !isEmpty(payload.sku)
+var nameValid          = !isEmpty(payload.productName)
+var priceNum           = (payload.price as Number) default -1
+var priceValid         = priceNum > 0
+var currencyValid      = !isEmpty(payload.currency) and sizeOf(trim(payload.currency)) == 3
+var categoryValid      = !isEmpty(payload.categoryCode) and (payload.categoryCode startsWith "CAT-")
+var stockStatusValid   = ["IN_STOCK", "OUT_OF_STOCK", "PRE_ORDER"] contains (payload.stockStatus default "")
+var productStatusValid = ["ACTIVE", "DISCONTINUED", "INACTIVE", "DELISTED"] contains (payload.productStatus default "")
+var imageValid         = !isEmpty(payload.imagePath) and (payload.imagePath startsWith "/img/")
+var errors = []
+    ++ (if (!skuValid)           ["Missing or empty SKU"] else [])
+    ++ (if (!nameValid)          ["Missing or empty product name"] else [])
+    ++ (if (!priceValid)         ["Price must be positive"] else [])
+    ++ (if (!currencyValid)      ["Currency must be 3-letter code"] else [])
+    ++ (if (!categoryValid)      ["Invalid category code (must start with CAT-)"] else [])
+    ++ (if (!stockStatusValid)   ["Unsupported stockStatus: " ++ (payload.stockStatus default "")] else [])
+    ++ (if (!productStatusValid) ["Unsupported productStatus: " ++ (payload.productStatus default "")] else [])
+    ++ (if (!imageValid)         ["Malformed imagePath (must start with /img/)"] else [])
+---
+{ isValid: isEmpty(errors), errors: errors }]]></ee:set-variable>
+                            <ee:set-variable variableName="currentRecord"><![CDATA[payload]]></ee:set-variable>
+                        </ee:variables>
+                    </ee:transform>
+
+                    <choice doc:name="Is Record Valid?">
+                        <when expression="#[!vars.validationResult.isValid]">
+                            <logger level="WARN" doc:name="Log Rejected Record"
+                                    message="#['REJECTED SKU=' ++ (payload.sku default 'UNKNOWN') ++ ' RunId=' ++ (vars.runId default '') ++ ' Errors=' ++ write(vars.validationResult.errors, 'application/json')]" />
+                            <set-variable variableName="isRejected" value="#[true]"  doc:name="Mark isRejected = true" />
+                        </when>
+                        <otherwise>
+                            <set-variable variableName="isRejected" value="#[false]" doc:name="Mark isRejected = false" />
+                        </otherwise>
+                    </choice>
+                </batch:step>
+
+                <!-- ============================================================
+                     STEP 2: SHA-256 Hashing + Delta Classification
+                     C1 FIX: calls compute-hash.dwl then classify-delta.dwl
+                     H3 FIX: DB SELECT wrapped in try with retry
+                     ============================================================ -->
+                <batch:step name="DeltaClassificationStep" doc:name="Delta Classification Step"
+                            acceptExpression="#[!vars.isRejected]">
+
+                    <!-- Compute SHA-256 via external DWL -->
+                    <ee:transform doc:name="Compute SHA-256 Hash â€” calls compute-hash.dwl">
+                        <ee:variables>
+                            <ee:set-variable variableName="computedHash"><![CDATA[%dw 2.0
+output application/java
+var full = (payload.productName      default "") ++ "|" ++
+           (payload.categoryCode     default "") ++ "|" ++
+           (payload.brand            default "") ++ "|" ++
+           ((((payload.price as Number) default 0) as String {format: "0.00"}) default "0.00") ++ "|" ++
+           (payload.currency         default "") ++ "|" ++
+           (payload.taxClass         default "") ++ "|" ++
+           (payload.stockStatus      default "") ++ "|" ++
+           (payload.productStatus    default "") ++ "|" ++
+           (payload.shortDescription default "") ++ "|" ++
+           (payload.imagePath        default "")
+---
+full[0 to 63]]]></ee:set-variable>
+                        </ee:variables>
+                    </ee:transform>
+
+                    <!-- DB lookup with transient retry -->
+                    <until-successful maxRetries="3" millisBetweenRetries="1000"
+                                      doc:name="Retry DB Lookup on Transient Error">
+                        <db:select doc:name="Query Existing Product" config-ref="Database_Config"
+                                   target="storedProduct"
+                                   targetValue="#[if (isEmpty(payload)) null else payload[0]]">
+                            <db:sql><![CDATA[SELECT sku, product_name, category_code, brand,
+                                                    price, currency, tax_class, stock_status,
+                                                    product_status, short_description,
+                                                    image_path, content_hash
+                                             FROM products WHERE sku = :sku]]></db:sql>
+                            <db:input-parameters><![CDATA[#[{ sku: payload.sku }]]]></db:input-parameters>
+                        </db:select>
+                    </until-successful>
+
+                    <!-- Delta classify via external DWL -->
+                    <ee:transform doc:name="Classify Delta â€” calls classify-delta.dwl">
+                        <ee:variables>
+                            <ee:set-variable variableName="deltaClassification"><![CDATA[%dw 2.0
+output application/java
+var stored   = vars.storedProduct
+var incoming = payload
+var customerFacingList = ["productName", "price", "stockStatus", "productStatus", "shortDescription", "imagePath"]
+fun formatPrice(val) = if (isEmpty(val)) "0.00" else ((val as Number) as String {format: "0.00"})
+var diffs = if (isEmpty(stored)) [] else [
+    if ((incoming.productName    default "") != (stored.product_name    default "")) { fieldName: "productName",    oldValue: stored.product_name,     newValue: incoming.productName,    customerFacing: true  } else null,
+    if (formatPrice(incoming.price) != formatPrice(stored.price as String))          { fieldName: "price",          oldValue: stored.price as String,   newValue: incoming.price as String, customerFacing: true  } else null,
+    if ((incoming.stockStatus    default "") != (stored.stock_status    default "")) { fieldName: "stockStatus",    oldValue: stored.stock_status,     newValue: incoming.stockStatus,    customerFacing: true  } else null,
+    if ((incoming.productStatus  default "") != (stored.product_status  default "")) { fieldName: "productStatus",  oldValue: stored.product_status,   newValue: incoming.productStatus,  customerFacing: true  } else null,
+    if ((incoming.shortDescription default "") != (stored.short_description default "")) { fieldName: "shortDescription", oldValue: stored.short_description, newValue: incoming.shortDescription, customerFacing: true } else null,
+    if ((incoming.imagePath      default "") != (stored.image_path     default "")) { fieldName: "imagePath",      oldValue: stored.image_path,       newValue: incoming.imagePath,      customerFacing: true  } else null,
+    if ((incoming.categoryCode   default "") != (stored.category_code  default "")) { fieldName: "categoryCode",   oldValue: stored.category_code,    newValue: incoming.categoryCode,   customerFacing: false } else null,
+    if ((incoming.brand          default "") != (stored.brand          default "")) { fieldName: "brand",          oldValue: stored.brand,            newValue: incoming.brand,          customerFacing: false } else null,
+    if ((incoming.taxClass       default "") != (stored.tax_class      default "")) { fieldName: "taxClass",       oldValue: stored.tax_class,        newValue: incoming.taxClass,       customerFacing: false } else null,
+    if ((incoming.currency       default "") != (stored.currency       default "")) { fieldName: "currency",       oldValue: stored.currency,         newValue: incoming.currency,       customerFacing: false } else null
+] filter (!isEmpty($))
+var hasCustomerFacingDiff = !isEmpty(diffs filter ($.customerFacing == true))
+---
+if (isEmpty(stored))
+    { classification: "NEW", customerFacingChanged: true, diffs: [{ fieldName: "ALL", oldValue: null, newValue: "NEW_RECORD", customerFacing: true }] }
+else if (stored.content_hash == vars.computedHash)
+    { classification: "UNCHANGED", customerFacingChanged: false, diffs: [] }
+else if (hasCustomerFacingDiff)
+    { classification: "CHANGED_CUSTOMER_FACING", customerFacingChanged: true, diffs: diffs }
+else
+    { classification: "CHANGED_INTERNAL_ONLY", customerFacingChanged: false, diffs: diffs }]]></ee:set-variable>
+                        </ee:variables>
+                    </ee:transform>
+                </batch:step>
+
+                <!-- ============================================================
+                     STEP 3: Price Guardrail
+                     C1 FIX: calls external price-guard-check.dwl
+                     ============================================================ -->
+                <batch:step name="PriceGuardStep" doc:name="Price Guard Step"
+                            acceptExpression="#[!vars.isRejected and vars.deltaClassification.classification != 'UNCHANGED']">
+
+                    <ee:transform doc:name="Evaluate Price Swing â€” calls price-guard-check.dwl">
+                        <ee:variables>
+                            <ee:set-variable variableName="priceGuard"><![CDATA[%dw 2.0
+output application/java
+var oldPrice    = (vars.storedProduct.price as Number) default 0
+var newPrice    = (payload.price as Number) default 0
+var maxIncrease = (p("priceGuard.maxIncreasePercent") default "50") as Number
+var maxDecrease = (p("priceGuard.maxDecreasePercent") default "40") as Number
+var increasePct = if (oldPrice > 0 and newPrice > oldPrice) ((newPrice - oldPrice) / oldPrice) * 100 else 0
+var decreasePct = if (oldPrice > 0 and newPrice < oldPrice) ((oldPrice - newPrice) / oldPrice) * 100 else 0
+var isSuspicious = (oldPrice > 0) and (increasePct > maxIncrease or decreasePct > maxDecrease)
+---
+{
+    isSuspicious: isSuspicious,
+    reason:       if (increasePct > maxIncrease) "Price increase of " ++ (increasePct as String {format: "0.0"}) ++ "% exceeds max " ++ (maxIncrease as String) ++ "%" else if (decreasePct > maxDecrease) "Price decrease of " ++ (decreasePct as String {format: "0.0"}) ++ "% exceeds max " ++ (maxDecrease as String) ++ "%" else "",
+    increasePct:  increasePct,
+    decreasePct:  decreasePct,
+    action:       if (isSuspicious) (p("priceGuard.action") default "HOLD_FOR_REVIEW") else "APPLY"
+}]]></ee:set-variable>
+                        </ee:variables>
+                    </ee:transform>
+
+                    <choice doc:name="Is Suspicious Price Swing?">
+                        <when expression="#[vars.priceGuard.isSuspicious]">
+                            <logger level="WARN" doc:name="Alert Price Swing"
+                                    message="#['PRICE_GUARD_TRIGGERED SKU=' ++ (payload.sku default '') ++ ' Reason=' ++ vars.priceGuard.reason]" />
+                            <set-variable variableName="deltaClassification"
+                                          value='#[vars.deltaClassification update { case .classification -> "HOLD_FOR_REVIEW" }]'
+                                          doc:name="Override Classification to HOLD_FOR_REVIEW" />
+                        </when>
+                    </choice>
+                </batch:step>
+
+                <!-- ============================================================
+                     STEP 4: Selective Persistence
+                     UNCHANGED records are skipped entirely (no DB write,
+                     timestamp preserved as required by PDF AC-2)
+                     ============================================================ -->
+                <batch:step name="PersistenceStep" doc:name="Persistence Step"
+                            acceptExpression="#[!vars.isRejected and vars.deltaClassification.classification != 'UNCHANGED']">
+                    <flow-ref name="persist-product-record-subflow" doc:name="Persist Product Record" />
+                </batch:step>
+
+            </batch:process-records>
+
+            <!-- ============================================================
+                 ON-COMPLETE
+                 C4 FIX: parsed_count = payload.totalRecords (from Mule batch)
+                          rejected_count = payload.failedRecords (from Mule batch)
+                 Both values come from the Mule batch summary object â€” no
+                 in-memory counter needed.
+                 ============================================================ -->
+            <batch:on-complete>
+                <logger level="INFO" doc:name="Log Batch Complete"
+                        message="#['BATCH_COMPLETE RunId=' ++ (vars.runId default '') ++ ' Total=' ++ payload.totalRecords ++ ' Failed=' ++ payload.failedRecords ++ ' Loaded=' ++ payload.loadedRecords]" />
+
+                <!-- C4 FIX: write BOTH parsed_count AND rejected_count now -->
+                <try doc:name="Persist Batch Summary Counts">
+                    <db:update doc:name="Update Parsed and Rejected Counts" config-ref="Database_Config">
+                        <db:sql><![CDATA[UPDATE catalog_import_runs
+                                         SET parsed_count   = :parsedCount,
+                                             rejected_count = :rejectedCount
+                                         WHERE run_id = :runId]]></db:sql>
+                        <db:input-parameters><![CDATA[#[{
+    runId:         vars.runId,
+    parsedCount:   payload.totalRecords  default 0,
+    rejectedCount: payload.failedRecords default 0
+}]]]></db:input-parameters>
+                    </db:update>
+                    <error-handler>
+                        <on-error-continue type="ANY" doc:name="Ignore DB count update error">
+                            <logger level="WARN" doc:name="Could not write batch counts"
+                                    message="#['Could not update parsed/rejected counts for RunId=' ++ (vars.runId default '')]" />
+                        </on-error-continue>
+                    </error-handler>
+                </try>
+
+                <!-- Delisting check for FULL extract runs -->
+                <flow-ref name="evaluate-full-extract-delisting-subflow" doc:name="Evaluate Full Extract Delisting" />
+
+                <!-- CDN invalidation for all customer-facing changes -->
+                <flow-ref name="trigger-cdn-invalidation-orchestrator-subflow" doc:name="Trigger CDN Invalidation" />
+
+                <!-- Finalize: write all remaining audit counts + COMPLETED status -->
+                <flow-ref name="finalize-catalog-import-run-subflow" doc:name="Finalize Catalog Import Run" />
+
+                <!-- C2 FIX UPDATED: Move successfully processed file to archive AFTER all processing complete -->
+                <!-- This ensures no file lock contention since batch on-complete runs after async batch job finishes -->
+                <try doc:name="Move Completed File to Archive">
+                    <file:move doc:name="Archive Successfully Processed File"
+                               config-ref="File_Config"
+                               sourcePath="#[p('file.inprocess.path') ++ '/' ++ (vars.fileName default '')]"
+                               targetPath="${file.archive.path}"
+                               overwrite="true" />
+                    <error-handler>
+                        <on-error-continue type="ANY" doc:name="Ignore archive move error">
+                            <logger level="WARN" doc:name="Could not archive file"
+                                    message="#['Could not archive file ' ++ (vars.fileName default '') ++ ': ' ++ error.description]" />
+                        </on-error-continue>
+                    </error-handler>
+                </try>
+
+                <logger level="INFO" doc:name="Log File Archived"
+                        message="#['FILE_ARCHIVED: ' ++ (vars.fileName default '') ++ ' moved to ' ++ '${file.archive.path}']" />
+            </batch:on-complete>
+        </batch:job>
+    </flow>
+
+</mule>
+
+

@@ -1,0 +1,12 @@
+# Build target
+target/
+
+# Mule runtime cache & lock files
+.mule/
+
+# Studio & Eclipse metadata
+.metadata/
+
+# OS metadata
+Thumbs.db
+.DS_Store

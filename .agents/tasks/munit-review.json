@@ -1,0 +1,46 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "severity": "HIGH",
+      "label": "Missing batch-on-complete handler tests",
+      "description": "Tests reference catalog-batch-processing-flow but don't test the batch completion trigger (on-complete section) that invokes downstream delisting, CDN invalidation, and finalization subflows. Test-40 attempts integration but only validates the intake orchestrator. The batch processor's on-complete callback is untested."
+    },
+    {
+      "severity": "HIGH",
+      "label": "No schema initialization failure scenario coverage",
+      "description": "Test-44 mocks db:execute-ddl to succeed, but no test covers DB:CONNECTIVITY, DB:QUERY_EXECUTION, or other transient failures during schema setup. Critical startup path has zero failure-case coverage."
+    },
+    {
+      "severity": "MEDIUM",
+      "label": "CDN retry logic incomplete",
+      "description": "Tests mock single HTTP failures but don't validate until-successful retry counts, backoff timing, or max-attempts termination. Test-25 (retry exhausted) and test-22/23 (429/CONNECTIVITY) don't verify that retries actually occur; they only verify that errors are mocked."
+    },
+    {
+      "severity": "MEDIUM",
+      "label": "Global error handler HTTP propagation untested",
+      "description": "Tests-31 through test-39 use http:request with error-response-handler, but this doesn't actually test whether errors from nested processors propagate through APIKit and the error handler to HTTP response. The tests mock direct flow-refs instead of invoking through the HTTP listener and router."
+    },
+    {
+      "severity": "MEDIUM",
+      "label": "Transaction rollback on persistence failure untested",
+      "description": "Persistence tests mock successful db:insert/update, but no test triggers a failure mid-persistence (e.g., db:insert succeeds but history insert fails) to verify rollback or compensating transaction behavior. until-successful wrapping may hide failures."
+    },
+    {
+      "severity": "LOW",
+      "label": "Delisting edge case: exact boundary at fetch limit untested",
+      "description": "Delisting tests return hardcoded results, but no test validates behavior when the database cursor exactly hits batch size limits or pagination boundaries during the absent-product scan."
+    },
+    {
+      "severity": "LOW",
+      "label": "CDN batch dispatch with empty paths list untested",
+      "description": "Tests set currentBatchPaths but no test covers the case where the list is empty or null before dispatch. Pre-condition validation is not tested."
+    },
+    {
+      "severity": "LOW",
+      "label": "Correlation ID propagation in batch on-complete untested",
+      "description": "Test-45 checks correlation ID in error response for HTTP, but no test validates that correlationId flows through batch on-complete into delisting, CDN, and finalization subflows."
+    }
+  ],
+  "reviewDoc": "e:\\mulesoft\\retail-catalog-update-papi6\\.agents\\tasks\\munit-review.md"
+}

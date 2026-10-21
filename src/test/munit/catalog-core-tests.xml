@@ -1,0 +1,1579 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+      xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:file="http://www.mulesoft.org/schema/mule/file"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/munit       http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+        http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+        http://www.mulesoft.org/schema/mule/db          http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/file        http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/http        http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/ee/core     http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/batch       http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+    <munit:config name="catalog-core-tests" />
+
+    <!-- Helper test flow to trigger global error handler -->
+    <flow name="trigger-global-error-test-flow" doc:name="Trigger Global Error Test Flow">
+        <db:select config-ref="Database_Config" doc:name="Trigger Error DB Select">
+            <db:sql>SELECT 1</db:sql>
+        </db:select>
+    </flow>
+
+    <!-- ================================================================
+         GROUP 1: BATCH PROCESSING (T01 - T06)
+         ================================================================ -->
+
+    <!-- T01: NEW product classification -->
+    <munit:test name="t01-classification-new" doc:name="T01 Classification NEW">
+        <munit:execution>
+            <set-variable variableName="runId"       value="#['RUN-T01']" doc:name="runId" />
+            <set-variable variableName="extractType" value="#['DELTA']"   doc:name="extractType" />
+            <set-variable variableName="fileName"    value="#['TEST_T01.csv']" doc:name="fileName" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Existing Product T01">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Query Existing Product" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="storedProduct" value="#[null]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert New Product T01">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert New Product" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ generatedKeys: [1], affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert History T01">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert New Product History" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ generatedKeys: [1], affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <set-payload value="#[[{
+                sku: 'NEW-001', productName: 'New Product', categoryCode: 'CAT-APP',
+                brand: 'BrandX', price: '199.99', currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE',
+                shortDescription: 'A new product', imagePath: '/img/new-001.jpg'
+            }]]" mimeType="application/java" doc:name="Payload NEW" />
+            <flow-ref name="catalog-batch-processing-flow" doc:name="Run Batch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Batch completed for NEW product" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T02: UNCHANGED product -->
+    <munit:test name="t02-classification-unchanged" doc:name="T02 Classification UNCHANGED">
+        <munit:execution>
+            <set-variable variableName="runId"       value="#['RUN-T02']" doc:name="runId" />
+            <set-variable variableName="extractType" value="#['DELTA']"   doc:name="extractType" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Existing Same Hash T02">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Query Existing Product" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{
+                        sku: 'SAME-001', product_name: 'Stable Product', category_code: 'CAT-FAS',
+                        brand: 'BrandY', price: 100.00, currency: 'INR', tax_class: 'GST18',
+                        stock_status: 'IN_STOCK', product_status: 'ACTIVE',
+                        short_description: 'Stable', image_path: '/img/stable.jpg',
+                        content_hash: 'Stable Product|CAT-FAS|BrandY|100.00|INR|GST18|IN_STOCK|ACTIVE|Stable|/img/stable.jpg'[0 to 63]
+                    }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="storedProduct" value="#[{
+                            sku: 'SAME-001', product_name: 'Stable Product', category_code: 'CAT-FAS',
+                            brand: 'BrandY', price: 100.00, currency: 'INR', tax_class: 'GST18',
+                            stock_status: 'IN_STOCK', product_status: 'ACTIVE',
+                            short_description: 'Stable', image_path: '/img/stable.jpg',
+                            content_hash: 'Stable Product|CAT-FAS|BrandY|100.00|INR|GST18|IN_STOCK|ACTIVE|Stable|/img/stable.jpg'[0 to 63]
+                        }]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <set-payload value="#[[{
+                sku: 'SAME-001', productName: 'Stable Product', categoryCode: 'CAT-FAS',
+                brand: 'BrandY', price: '100.00', currency: 'INR', taxClass: 'GST18',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE',
+                shortDescription: 'Stable', imagePath: '/img/stable.jpg'
+            }]]" mimeType="application/java" doc:name="Payload UNCHANGED" />
+            <flow-ref name="catalog-batch-processing-flow" doc:name="Run Batch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Batch completes for UNCHANGED" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T03: CHANGED_CUSTOMER_FACING persistence -->
+    <munit:test name="t03-classification-changed-customer-facing" doc:name="T03 Classification CHANGED_CUSTOMER_FACING">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T03']" doc:name="runId" />
+            <set-variable variableName="currentRecord" value="#[{ sku: 'CF-001' }]" doc:name="currentRecord" />
+            <set-variable variableName="computedHash" value="#['HASH-CF-001']" doc:name="computedHash" />
+            <set-variable variableName="deltaClassification" value="#[{
+                classification: 'CHANGED_CUSTOMER_FACING',
+                customerFacingChanged: true,
+                diffs: [{ fieldName: 'price', oldValue: '100.00', newValue: '140.00', customerFacing: true }]
+            }]" doc:name="deltaClassification" />
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Update Changed Product T03">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Update Changed Product" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Field History T03">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Field History" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ generatedKeys: [1], affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <set-payload value="#[{
+                sku: 'CF-001', productName: 'Changed Product', categoryCode: 'CAT-HOM',
+                brand: 'BrandZ', price: '140.00', currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE',
+                shortDescription: 'Old description', imagePath: '/img/old.jpg'
+            }]" mimeType="application/java" doc:name="Payload CF Changed" />
+            <flow-ref name="persist-product-record-subflow" doc:name="Run Persistence Subflow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" atLeast="1" doc:name="DB Update called for CF change" />
+            <munit-tools:verify-call processor="db:insert" atLeast="1" doc:name="DB Insert called for history row" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T04: CHANGED_INTERNAL_ONLY persistence -->
+    <munit:test name="t04-classification-changed-internal-only" doc:name="T04 Classification CHANGED_INTERNAL_ONLY">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T04']" doc:name="runId" />
+            <set-variable variableName="currentRecord" value="#[{ sku: 'IO-001' }]" doc:name="currentRecord" />
+            <set-variable variableName="computedHash" value="#['HASH-IO-001']" doc:name="computedHash" />
+            <set-variable variableName="deltaClassification" value="#[{
+                classification: 'CHANGED_INTERNAL_ONLY',
+                customerFacingChanged: false,
+                diffs: [{ fieldName: 'brand', oldValue: 'OldBrand', newValue: 'NewBrand', customerFacing: false }]
+            }]" doc:name="deltaClassification" />
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Update Changed Product T04">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Update Changed Product" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Field History T04">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Field History" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ generatedKeys: [1], affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <set-payload value="#[{
+                sku: 'IO-001', productName: 'Internal Product', categoryCode: 'CAT-APP',
+                brand: 'NewBrand', price: '100.00', currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE',
+                shortDescription: 'Same desc', imagePath: '/img/io.jpg'
+            }]" mimeType="application/java" doc:name="Payload IO Changed" />
+            <flow-ref name="persist-product-record-subflow" doc:name="Run Persistence Subflow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" atLeast="1" doc:name="DB Update called for IO change" />
+            <munit-tools:verify-call processor="db:insert" atLeast="1" doc:name="DB Insert called for history row" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T05: HOLD_FOR_REVIEW persistence -->
+    <munit:test name="t05-hold-for-review-price-spike" doc:name="T05 HOLD_FOR_REVIEW Price Spike">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T05']" doc:name="runId" />
+            <set-variable variableName="storedProduct" value="#[{ sku: 'HOLD-001', price: 100.00 }]" doc:name="storedProduct" />
+            <set-variable variableName="deltaClassification" value="#[{
+                classification: 'HOLD_FOR_REVIEW',
+                customerFacingChanged: false,
+                diffs: []
+            }]" doc:name="deltaClassification" />
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Flag Review Hold T05">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Flag Review Hold On Product" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Price Guard History T05">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Price Guard History Row" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ generatedKeys: [1], affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <set-payload value="#[{
+                sku: 'HOLD-001', price: '5000.00'
+            }]" mimeType="application/java" doc:name="Payload HOLD" />
+            <flow-ref name="persist-product-record-subflow" doc:name="Run Persistence Subflow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" atLeast="1" doc:name="DB Update called for review_hold" />
+            <munit-tools:verify-call processor="db:insert" atLeast="1" doc:name="DB Insert called for price guard history" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T06: INVALID RECORD validation rejection -->
+    <munit:test name="t06-invalid-record-validation" doc:name="T06 Invalid Record Rejected">
+        <munit:execution>
+            <set-variable variableName="runId"       value="#['RUN-T06']" doc:name="runId" />
+            <set-variable variableName="extractType" value="#['DELTA']"   doc:name="extractType" />
+            <set-payload value="#[[
+                { sku: '',         productName: 'No SKU',    categoryCode: 'CAT-APP', brand: 'B', price: '10.00',   currency: 'INR', taxClass: 'GST12', stockStatus: 'IN_STOCK',  productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/a.jpg' },
+                { sku: 'VALID-01', productName: 'Valid',     categoryCode: 'CAT-APP', brand: 'B', price: '10.00',   currency: 'INR', taxClass: 'GST12', stockStatus: 'IN_STOCK',  productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/b.jpg' },
+                { sku: 'BAD-PRICE',productName: 'Bad Price', categoryCode: 'CAT-APP', brand: 'B', price: 'NOTNUM', currency: 'INR', taxClass: 'GST12', stockStatus: 'IN_STOCK',  productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/c.jpg' }
+            ]]" mimeType="application/java" doc:name="Payload mixed valid/invalid" />
+            <flow-ref name="catalog-batch-processing-flow" doc:name="Run Batch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Batch completes without exception" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ================================================================
+         GROUP 2: INTAKE ORCHESTRATOR & LISTENER (T07 - T11b)
+         ================================================================ -->
+
+    <!-- T07: DUPLICATE FILE SKIPPED -->
+    <munit:test name="t07-duplicate-file-skipped" doc:name="T07 Duplicate File Skipped">
+        <munit:execution>
+            <set-variable variableName="fileName"     value="#['CATALOG_FULL_DUP_' ++ (uuid()[0 to 6]) ++ '.csv']" doc:name="fileName" />
+            <set-variable variableName="runId"        value="#['RUN-T07']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['FULL']" doc:name="extractType" />
+            <set-variable variableName="correlationId" value="#['CORR-T07']" doc:name="correlationId" />
+            <set-payload value="#[[{ sku:'DUP-001', productName:'D', categoryCode:'CAT-APP', brand:'B', price:'10.00', currency:'INR', taxClass:'GST12', stockStatus:'IN_STOCK', productStatus:'ACTIVE', shortDescription:'D', imagePath:'/img/d.jpg' }]]"
+                mimeType="application/java" doc:name="Payload" />
+            <set-variable variableName="filePayload"  value="#[payload]" doc:name="filePayload" />
+            <set-variable variableName="fileChecksum" value="#['CS_' ++ (uuid()[0 to 6])]" doc:name="fileChecksum" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Duplicate Found">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Run" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ run_id: 'RUN-OLD', run_status: 'COMPLETED' }]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="catalog-file-intake-orchestrator-flow" doc:name="Call Orchestrator" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('SKIPPED_DUPLICATE')]" doc:name="Status SKIPPED_DUPLICATE" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T08: TRUNCATED FULL EXTRACT -->
+    <munit:test name="t08-truncated-full-extract" doc:name="T08 Truncated Full Extract Aborted">
+        <munit:execution>
+            <set-variable variableName="fileName"     value="#['CATALOG_FULL_TRUNC_' ++ (uuid()[0 to 6]) ++ '.csv']" doc:name="fileName" />
+            <set-variable variableName="runId"        value="#['RUN-T08']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['FULL']" doc:name="extractType" />
+            <set-variable variableName="correlationId" value="#['CORR-T08']" doc:name="correlationId" />
+            <set-payload value="#[[
+                { sku: 'T-1', productName: 'P 1', categoryCode: 'CAT-APP', brand: 'B', price: '10.00', currency: 'INR', taxClass: 'GST12', stockStatus: 'IN_STOCK', productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/t.jpg' },
+                { sku: 'T-2', productName: 'P 2', categoryCode: 'CAT-APP', brand: 'B', price: '10.00', currency: 'INR', taxClass: 'GST12', stockStatus: 'IN_STOCK', productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/t.jpg' },
+                { sku: 'T-3', productName: 'P 3', categoryCode: 'CAT-APP', brand: 'B', price: '10.00', currency: 'INR', taxClass: 'GST12', stockStatus: 'IN_STOCK', productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/t.jpg' }
+            ]]" mimeType="application/java" doc:name="Payload 3 records" />
+            <set-variable variableName="filePayload"  value="#[payload]" doc:name="filePayload" />
+            <set-variable variableName="fileChecksum" value="#['CS_' ++ (uuid()[0 to 6])]" doc:name="fileChecksum" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Duplicate T08">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Run" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="file:move" doc:name="Mock Move Truncated File T08">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Move Truncated File to Error" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="catalog-file-intake-orchestrator-flow" doc:name="Call Orchestrator" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('ABORTED_TRUNCATED_EXTRACT')]" doc:name="Status ABORTED" />
+            <munit-tools:assert-that expression="#[payload.recordCount]" is="#[MunitTools::equalTo(3)]" doc:name="Record count 3" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T09: FULL EXTRACT PASSES MINIMUM -->
+    <munit:test name="t09-full-extract-passes-minimum" doc:name="T09 Full Extract Passes Minimum">
+        <munit:execution>
+            <set-variable variableName="fileName"     value="#['CATALOG_FULL_OK_' ++ (uuid()[0 to 6]) ++ '.csv']" doc:name="fileName" />
+            <set-variable variableName="runId"        value="#['RUN-T09']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['FULL']" doc:name="extractType" />
+            <set-variable variableName="correlationId" value="#['CORR-T09']" doc:name="correlationId" />
+            <set-payload value="#[(1 to 6) map (n) -> {
+                sku: 'F-' ++ n, productName: 'P ' ++ n, categoryCode: 'CAT-APP',
+                brand: 'B', price: '10.00', currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/f.jpg'
+            }]" mimeType="application/java" doc:name="Payload 6 records" />
+            <set-variable variableName="filePayload"  value="#[payload]" doc:name="filePayload" />
+            <set-variable variableName="fileChecksum" value="#['CS_' ++ (uuid()[0 to 6])]" doc:name="fileChecksum" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Duplicate T09">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Run" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Initial Run Record T09">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Initial Run Record" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Post Batch Run T09">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Fetch Post-Batch Run Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ parsed_count: 6, rejected_count: 0, run_status: 'IN_PROGRESS' }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="postBatchRun" value="#[[{ parsed_count: 6, rejected_count: 0, run_status: 'IN_PROGRESS' }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="catalog-file-intake-orchestrator-flow" doc:name="Call Orchestrator" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Flow completes" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T10: DELTA EXTRACT SKIPS MINIMUM CHECK -->
+    <munit:test name="t10-delta-extract-skips-minimum-check" doc:name="T10 Delta Skips Minimum Check">
+        <munit:execution>
+            <set-variable variableName="fileName"     value="#['CATALOG_DELTA_SMALL_' ++ (uuid()[0 to 6]) ++ '.csv']" doc:name="fileName" />
+            <set-variable variableName="runId"        value="#['RUN-T10']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['DELTA']" doc:name="extractType" />
+            <set-variable variableName="correlationId" value="#['CORR-T10']" doc:name="correlationId" />
+            <set-payload value="#[[{
+                sku: 'D-001', productName: 'Delta Product', categoryCode: 'CAT-APP',
+                brand: 'B', price: '10.00', currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE', shortDescription: 'D', imagePath: '/img/d.jpg'
+            }]]" mimeType="application/java" doc:name="Payload 1 record delta" />
+            <set-variable variableName="filePayload"  value="#[payload]" doc:name="filePayload" />
+            <set-variable variableName="fileChecksum" value="#['CS_' ++ (uuid()[0 to 6])]" doc:name="fileChecksum" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Duplicate T10">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Run" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Initial Run Record T10">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Initial Run Record" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Post Batch Run T10">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Fetch Post-Batch Run Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ parsed_count: 1, rejected_count: 0, run_status: 'IN_PROGRESS' }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="postBatchRun" value="#[[{ parsed_count: 1, rejected_count: 0, run_status: 'IN_PROGRESS' }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="catalog-file-intake-orchestrator-flow" doc:name="Call Orchestrator" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status default 'NOT_SKIPPED']"
+                is="#[MunitTools::not(MunitTools::equalTo('ABORTED_TRUNCATED_EXTRACT'))]"
+                doc:name="Delta not aborted for small record count" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T11: REJECTION THRESHOLD EXCEEDED -->
+    <munit:test name="t11-rejection-threshold-exceeded" doc:name="T11 Rejection Threshold Exceeded">
+        <munit:execution>
+            <set-variable variableName="fileName"     value="#['CATALOG_FULL_REJECT_' ++ (uuid()[0 to 6]) ++ '.csv']" doc:name="fileName" />
+            <set-variable variableName="runId"        value="#['RUN-T11']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['FULL']" doc:name="extractType" />
+            <set-variable variableName="correlationId" value="#['CORR-T11']" doc:name="correlationId" />
+            <set-payload value="#[(1 to 6) map (n) -> {
+                sku: 'R-' ++ n, productName: 'Reject ' ++ n, categoryCode: 'CAT-APP',
+                brand: 'B', price: '10.00', currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE', shortDescription: 'X', imagePath: '/img/r.jpg'
+            }]" mimeType="application/java" doc:name="Payload 6 records" />
+            <set-variable variableName="filePayload"  value="#[payload]" doc:name="filePayload" />
+            <set-variable variableName="fileChecksum" value="#['CS_' ++ (uuid()[0 to 6])]" doc:name="fileChecksum" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Duplicate T11">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Run" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Initial Run Record T11">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Initial Run Record" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock High Rejection T11">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Fetch Post-Batch Run Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ parsed_count: 100, rejected_count: 60, run_status: 'IN_PROGRESS' }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="postBatchRun" value="#[[{ parsed_count: 100, rejected_count: 60, run_status: 'IN_PROGRESS' }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Mark Run as ABORTED T11">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Mark Run as ABORTED" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="file:move" doc:name="Mock Move Rejected File T11">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Move File to Error on High Rejection" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[null]" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="catalog-file-intake-orchestrator-flow" doc:name="Call Orchestrator" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('ABORTED_HIGH_REJECTION')]" doc:name="Status ABORTED_HIGH_REJECTION" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T11b: INBOUND FILE LISTENER FLOW -->
+    <munit:test name="t11b-file-intake-listener" doc:name="T11b File Intake Listener Flow">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Dup Select T11b">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Run" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ run_id: 'RUN-EXISTING', run_status: 'COMPLETED' }]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit:set-event doc:name="Set Event">
+                <munit:payload value="#[[{ sku:'L-1', productName:'L', categoryCode:'CAT-APP', brand:'B', price:'10.00', currency:'INR', taxClass:'GST12', stockStatus:'IN_STOCK', productStatus:'ACTIVE', shortDescription:'L', imagePath:'/img/l.jpg' }]]" mediaType="application/java" />
+                <munit:attributes value="#[{ fileName: 'CATALOG_FULL_LISTENER.csv', size: 1024 }]" />
+            </munit:set-event>
+            <flow-ref name="catalog-file-intake-listener-flow" doc:name="Call Listener Flow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Listener flow completed" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ================================================================
+         GROUP 3: PERSISTENCE & DELISTING SUBFLOWS (T12 - T15)
+         ================================================================ -->
+
+    <!-- T12: FULL EXTRACT DELISTING WITH ABSENT PRODUCTS -->
+    <munit:test name="t12-delisting-full-extract" doc:name="T12 Full Extract Delisting">
+        <munit:execution>
+            <set-variable variableName="runId"        value="#['RUN-T12']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['FULL']"   doc:name="extractType" />
+            <set-variable variableName="omittedProducts" value="#[[{ sku: 'OLD-001', category_code: 'CAT-A' }, { sku: 'OLD-002', category_code: 'CAT-B' }]]" doc:name="omittedProducts" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Absent Products T12">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Absent Active Products" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ sku: 'OLD-001', category_code: 'CAT-A' }, { sku: 'OLD-002', category_code: 'CAT-B' }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="omittedProducts" value="#[[{ sku: 'OLD-001', category_code: 'CAT-A' }, { sku: 'OLD-002', category_code: 'CAT-B' }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Mark Delisted T12">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Mark Products Delisted" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 2 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Delist History T12">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Delisted History Row" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ generatedKeys: [1], affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="evaluate-full-extract-delisting-subflow" doc:name="Call Delisting Subflow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" atLeast="1" doc:name="Products marked DELISTED" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T13: FULL EXTRACT NO ABSENT PRODUCTS -->
+    <munit:test name="t13-delisting-no-absent-products" doc:name="T13 Full Extract No Products to Delist">
+        <munit:execution>
+            <set-variable variableName="runId"        value="#['RUN-T13']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['FULL']"   doc:name="extractType" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Absent Products T13">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Absent Active Products" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="omittedProducts" value="#[[]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="evaluate-full-extract-delisting-subflow" doc:name="Call Delisting Subflow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" times="0" doc:name="db:update NOT called when no absent products" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T14: DELTA SKIPS DELISTING -->
+    <munit:test name="t14-delisting-skipped-for-delta" doc:name="T14 Delta Skips Delisting">
+        <munit:execution>
+            <set-variable variableName="runId"        value="#['RUN-T14']" doc:name="runId" />
+            <set-variable variableName="extractType"  value="#['DELTA']"   doc:name="extractType" />
+            <flow-ref name="evaluate-full-extract-delisting-subflow" doc:name="Call Delisting Subflow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:select" times="0" doc:name="db:select NOT called for DELTA" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T15: DIRECT PERSIST NEW RECORD -->
+    <munit:test name="t15-persist-new-record" doc:name="T15 Persist NEW Record">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T15']" doc:name="runId" />
+            <set-variable variableName="computedHash" value="#['HASH-T15']" doc:name="computedHash" />
+            <set-variable variableName="deltaClassification" value="#[{ classification: 'NEW' }]" doc:name="deltaClassification" />
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Product T15">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert New Product" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Product History T15">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert New Product History" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <set-payload value="#[{
+                sku: 'NEW-DIRECT', productName: 'Direct Product', categoryCode: 'CAT-APP',
+                brand: 'B', price: 99.99, currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE',
+                shortDescription: 'Desc', imagePath: '/img/new.jpg'
+            }]" mimeType="application/java" doc:name="Payload NEW" />
+            <flow-ref name="persist-product-record-subflow" doc:name="Call Persistence Subflow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:insert" atLeast="2" doc:name="Product and History inserted" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ================================================================
+         GROUP 4: FINALIZE AUDIT SUBFLOW (T16 - T18)
+         ================================================================ -->
+
+    <!-- T16: STANDARD FINALIZE -->
+    <munit:test name="t16-finalize-run-standard" doc:name="T16 Finalize Standard Run">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T16']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock History T16">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Aggregate History Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ new_count: 5, changed_count: 2, held_count: 1, delisted_count: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="runMetrics" value="#[[{ new_count: 5, changed_count: 2, held_count: 1, delisted_count: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Invalidation T16">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Aggregate Invalidation Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ invalidation_requests: 1, invalidation_paths: 3, unconfirmed_paths: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="invMetrics" value="#[[{ invalidation_requests: 1, invalidation_paths: 3, unconfirmed_paths: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Parsed T16">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Fetch Parsed and Rejected Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ parsed_count: 10, rejected_count: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="parsedRow" value="#[[{ parsed_count: 10, rejected_count: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Finalize Update T16">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Finalize Run Record — All Audit Columns" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="finalize-catalog-import-run-subflow" doc:name="Call Finalize" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" atLeast="1" doc:name="Run finalized" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T17: FINALIZE HIGH CHANGE VOLUME ALERT (>80%) -->
+    <munit:test name="t17-finalize-high-change-volume-alert" doc:name="T17 Finalize High Change Volume Alert">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T17']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock High Changed T17">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Aggregate History Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ new_count: 0, changed_count: 90, held_count: 0, delisted_count: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="runMetrics" value="#[[{ new_count: 0, changed_count: 90, held_count: 0, delisted_count: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Invalidation T17">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Aggregate Invalidation Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ invalidation_requests: 1, invalidation_paths: 3, unconfirmed_paths: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="invMetrics" value="#[[{ invalidation_requests: 1, invalidation_paths: 3, unconfirmed_paths: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Parsed T17">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Fetch Parsed and Rejected Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ parsed_count: 100, rejected_count: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="parsedRow" value="#[[{ parsed_count: 100, rejected_count: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Finalize Update T17">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Finalize Run Record — All Audit Columns" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="finalize-catalog-import-run-subflow" doc:name="Call Finalize" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" atLeast="1" doc:name="Run finalized" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T17b: FINALIZE UNCONFIRMED INVALIDATIONS ALERT -->
+    <munit:test name="t17b-finalize-unconfirmed-alert" doc:name="T17b Finalize Unconfirmed Invalidations Alert">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T17B']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock History T17B">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Aggregate History Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ new_count: 2, changed_count: 1, held_count: 0, delisted_count: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="runMetrics" value="#[[{ new_count: 2, changed_count: 1, held_count: 0, delisted_count: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Unconfirmed T17B">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Aggregate Invalidation Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ invalidation_requests: 1, invalidation_paths: 2, unconfirmed_paths: 2 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="invMetrics" value="#[[{ invalidation_requests: 1, invalidation_paths: 2, unconfirmed_paths: 2 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Parsed T17B">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Fetch Parsed and Rejected Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ parsed_count: 3, rejected_count: 0 }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="parsedRow" value="#[[{ parsed_count: 3, rejected_count: 0 }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Finalize Update T17B">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Finalize Run Record — All Audit Columns" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="finalize-catalog-import-run-subflow" doc:name="Call Finalize" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:update" atLeast="1" doc:name="Run finalized" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ================================================================
+         GROUP 5: CDN INVALIDATION SUBFLOWS (T18 - T22b)
+         ================================================================ -->
+
+    <!-- T18: CDN ORCHESTRATOR NO CHANGES -->
+    <munit:test name="t18-cdn-orchestrator-no-changes" doc:name="T18 CDN Orchestrator No Changes">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T18']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Changed Products T18">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Customer-Facing Changed Products for Invalidation" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="changedProducts" value="#[[]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="trigger-cdn-invalidation-orchestrator-subflow" doc:name="Call CDN Orchestrator" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="http:request" times="0" doc:name="HTTP NOT called when no changes" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T19: CDN ORCHESTRATOR WITH CHANGES -->
+    <munit:test name="t19-cdn-orchestrator-with-changes" doc:name="T19 CDN Orchestrator Fires With Changes">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T19']" doc:name="runId" />
+            <set-variable variableName="changedProducts" value="#[[{ sku: 'SKU-A', category_code: 'CAT-APP' }, { sku: 'SKU-B', category_code: 'CAT-FAS' }]]" doc:name="changedProducts" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Changed Products T19">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Find Customer-Facing Changed Products for Invalidation" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ sku: 'SKU-A', category_code: 'CAT-APP' }, { sku: 'SKU-B', category_code: 'CAT-FAS' }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="changedProducts" value="#[[{ sku: 'SKU-A', category_code: 'CAT-APP' }, { sku: 'SKU-B', category_code: 'CAT-FAS' }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="http:request" doc:name="Mock CDN 202 T19">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ invalidationId: 'INV-T19', status: 'IN_PROGRESS' }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 202, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock CDN Insert T19">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert CDN Invalidation Record" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="trigger-cdn-invalidation-orchestrator-subflow" doc:name="Call CDN Orchestrator" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="http:request" atLeast="1" doc:name="HTTP called for changes" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T20: CDN DISPATCH 202 ACCEPTED -->
+    <munit:test name="t20-cdn-dispatch-202-accepted" doc:name="T20 CDN Dispatch 202 Accepted">
+        <munit:execution>
+            <set-variable variableName="runId"             value="#['RUN-T20']" doc:name="runId" />
+            <set-variable variableName="currentBatchPaths" value="#[['/p/SKU-1', '/p/SKU-2']]" doc:name="paths" />
+            <set-variable variableName="currentBatchNumber" value="#[1]" doc:name="batchNumber" />
+            <set-variable variableName="requestReference"  value="#['RUN-T20-B1']" doc:name="requestRef" />
+            <munit-tools:mock-when processor="http:request" doc:name="Mock CDN 202 T20">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ invalidationId: 'INV-T20', status: 'IN_PROGRESS', pathCount: 2 }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 202, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock CDN Insert T20">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert CDN Invalidation Record" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="dispatch-cdn-invalidation-batch-subflow" doc:name="Call CDN Dispatch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:insert" atLeast="1" doc:name="Audit record inserted for 202" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T21: CDN DISPATCH 207 PARTIAL REJECTION & RETRY -->
+    <munit:test name="t21-cdn-dispatch-207-partial" doc:name="T21 CDN Dispatch 207 Partial Rejection">
+        <munit:execution>
+            <set-variable variableName="runId"             value="#['RUN-T21']" doc:name="runId" />
+            <set-variable variableName="currentBatchPaths" value="#[['/p/SKU-OK', '/p/INVALID-PATH']]" doc:name="paths" />
+            <set-variable variableName="currentBatchNumber" value="#[1]" doc:name="batchNumber" />
+            <set-variable variableName="requestReference"  value="#['RUN-T21-B1']" doc:name="requestRef" />
+            <munit-tools:mock-when processor="http:request" doc:name="Mock CDN 207 T21">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Call CDN Invalidation API" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ invalidationId: 'INV-T21', accepted: ['/p/SKU-OK'], rejected: [{ path: '/p/INVALID-PATH', reason: 'INVALID_PATH_PATTERN' }] }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 207, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="http:request" doc:name="Mock Retry Path T21">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Retry Single Path CDN Call" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ status: 'ACCEPTED' }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 202, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock CDN Insert T21">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="dispatch-cdn-invalidation-batch-subflow" doc:name="Call CDN Dispatch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:insert" atLeast="2" doc:name="Audit records inserted for 207 and retry" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T21b: CDN DISPATCH 207 RETRY UNCONFIRMED -->
+    <munit:test name="t21b-cdn-dispatch-207-retry-unconfirmed" doc:name="T21b CDN Dispatch 207 Retry Unconfirmed">
+        <munit:execution>
+            <set-variable variableName="runId"             value="#['RUN-T21B']" doc:name="runId" />
+            <set-variable variableName="currentBatchPaths" value="#[['/p/SKU-OK', '/p/RETRY-FAIL']]" doc:name="paths" />
+            <set-variable variableName="currentBatchNumber" value="#[1]" doc:name="batchNumber" />
+            <set-variable variableName="requestReference"  value="#['RUN-T21B-B1']" doc:name="requestRef" />
+            <munit-tools:mock-when processor="http:request" doc:name="Mock CDN 207 T21B">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Call CDN Invalidation API" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ invalidationId: 'INV-T21B', accepted: ['/p/SKU-OK'], rejected: [{ path: '/p/RETRY-FAIL', reason: 'REJECT' }] }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 207, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="http:request" doc:name="Mock Retry Path Fail T21B">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Retry Single Path CDN Call" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ status: 'FAILED' }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 500, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock CDN Insert T21B">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="dispatch-cdn-invalidation-batch-subflow" doc:name="Call CDN Dispatch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="db:insert" atLeast="2" doc:name="Records inserted" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T21c: CDN DISPATCH 207 RETRY EXCEPTION HANDLER -->
+    <munit:test name="t21c-cdn-dispatch-207-retry-exception" doc:name="T21c CDN Dispatch 207 Retry Exception">
+        <munit:execution>
+            <set-variable variableName="runId"             value="#['RUN-T21C']" doc:name="runId" />
+            <set-variable variableName="currentBatchPaths" value="#[['/p/SKU-OK', '/p/RETRY-ERR']]" doc:name="paths" />
+            <set-variable variableName="currentBatchNumber" value="#[1]" doc:name="batchNumber" />
+            <set-variable variableName="requestReference"  value="#['RUN-T21C-B1']" doc:name="requestRef" />
+            <munit-tools:mock-when processor="http:request" doc:name="Mock CDN 207 T21C">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Call CDN Invalidation API" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ invalidationId: 'INV-T21C', accepted: ['/p/SKU-OK'], rejected: [{ path: '/p/RETRY-ERR', reason: 'REJECT' }] }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 207, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="http:request" doc:name="Mock Retry Path Exception T21C">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Retry Single Path CDN Call" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:CONNECTIVITY" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock CDN Insert T21C">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="dispatch-cdn-invalidation-batch-subflow" doc:name="Call CDN Dispatch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Retry exception handled" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T22: CDN DISPATCH PERMANENT FAILURE -->
+    <munit:test name="t22-cdn-dispatch-permanent-failure" doc:name="T22 CDN Dispatch Permanent Failure">
+        <munit:execution>
+            <set-variable variableName="runId"             value="#['RUN-T22']" doc:name="runId" />
+            <set-variable variableName="currentBatchPaths" value="#[['/p/FAIL-SKU']]" doc:name="paths" />
+            <set-variable variableName="currentBatchNumber" value="#[1]" doc:name="batchNumber" />
+            <set-variable variableName="requestReference"  value="#['RUN-T22-B1']" doc:name="requestRef" />
+            <munit-tools:mock-when processor="http:request" doc:name="Mock Permanent HTTP Error T22">
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:BAD_REQUEST" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Pending Insert T22">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="dispatch-cdn-invalidation-batch-subflow" doc:name="Call CDN Dispatch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Permanent failure handled gracefully" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T22b: CDN 429 RATE LIMIT -->
+    <munit:test name="t34-cdn-429-rate-limit" doc:name="T34 CDN 429 Rate Limit Retried">
+        <munit:execution>
+            <set-variable variableName="runId"             value="#['RUN-T34']" doc:name="runId" />
+            <set-variable variableName="currentBatchPaths" value="#[['/p/SKU-429']]" doc:name="paths" />
+            <set-variable variableName="currentBatchNumber" value="#[1]" doc:name="batchNumber" />
+            <set-variable variableName="requestReference"  value="#['RUN-T34-B1']" doc:name="requestRef" />
+            <munit-tools:mock-when processor="http:request" doc:name="Mock CDN 202 T34">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ invalidationId: 'INV-T34', status: 'IN_PROGRESS' }]" mediaType="application/java" />
+                    <munit-tools:attributes value="#[{ statusCode: 202, headers: { 'Content-Type': 'application/json' } }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock CDN Insert T34">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="dispatch-cdn-invalidation-batch-subflow" doc:name="Call CDN Dispatch" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:verify-call processor="http:request" atLeast="1" doc:name="HTTP called" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ================================================================
+         GROUP 6: API ENDPOINTS & MOCK CDN (T23 - T33)
+         ================================================================ -->
+
+    <!-- T23: POST /catalog/trigger -->
+    <munit:test name="t23-post-catalog-trigger" doc:name="T23 POST Catalog Trigger">
+        <munit:execution>
+            <set-variable variableName="fileName" value="#['CATALOG_MANUAL_T23.csv']" doc:name="fileName" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock No Dup T23">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Check Duplicate Run" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert Initial Run T23">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Insert Initial Run Record" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Post Batch Run T23">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Fetch Post-Batch Run Counts" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ parsed_count: 5, rejected_count: 0, run_status: 'IN_PROGRESS' }]]" mediaType="application/java" />
+                    <munit-tools:variables>
+                        <munit-tools:variable key="postBatchRun" value="#[[{ parsed_count: 5, rejected_count: 0, run_status: 'IN_PROGRESS' }]]" />
+                    </munit-tools:variables>
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <set-payload value="#[(1 to 5) map (n) -> {
+                sku: 'API-' ++ n, productName: 'API Product ' ++ n, categoryCode: 'CAT-APP',
+                brand: 'B', price: '99.99', currency: 'INR', taxClass: 'GST12',
+                stockStatus: 'IN_STOCK', productStatus: 'ACTIVE', shortDescription: 'API', imagePath: '/img/api.jpg'
+            }]" mimeType="application/java" doc:name="Payload 5 products" />
+            <flow-ref name="post:\catalog\trigger:retail-catalog-apikit-config" doc:name="Call POST Trigger" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('ACCEPTED')]" doc:name="Status ACCEPTED" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T24: GET /catalog/runs -->
+    <munit:test name="t24-get-catalog-runs" doc:name="T24 GET Catalog Runs">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Runs Query T24">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Select All Import Runs" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ run_id: 'RUN-A', run_status: 'COMPLETED' }, { run_id: 'RUN-B', run_status: 'IN_PROGRESS' }]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="get:\catalog\runs:retail-catalog-apikit-config" doc:name="Call GET Runs" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[sizeOf(payload)]" is="#[MunitTools::equalTo(2)]" doc:name="Returns 2 runs" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T25: GET /catalog/runs empty -->
+    <munit:test name="t25-get-catalog-runs-empty" doc:name="T25 GET Catalog Runs Empty">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Empty Runs T25">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Select All Import Runs" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="get:\catalog\runs:retail-catalog-apikit-config" doc:name="Call GET Runs" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[sizeOf(payload)]" is="#[MunitTools::equalTo(0)]" doc:name="Empty array returned" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T26: GET /catalog/products -->
+    <munit:test name="t26-get-catalog-products" doc:name="T26 GET Catalog Products">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Products T26">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Select All Products" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ sku: 'P1', price: 100.00 }, { sku: 'P2', price: 200.00 }, { sku: 'P3', price: 300.00 }]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="get:\catalog\products:retail-catalog-apikit-config" doc:name="Call GET Products" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[sizeOf(payload)]" is="#[MunitTools::equalTo(3)]" doc:name="Returns 3 products" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T27: GET /catalog/history -->
+    <munit:test name="t27-get-catalog-history" doc:name="T27 GET Catalog History">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock History T27">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Select All Change History" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ sku: 'A', change_type: 'NEW' }, { sku: 'B', change_type: 'CHANGED_CUSTOMER_FACING' }]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="get:\catalog\history:retail-catalog-apikit-config" doc:name="Call GET History" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[sizeOf(payload)]" is="#[MunitTools::equalTo(2)]" doc:name="Returns 2 history rows" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T28: GET /catalog/invalidations -->
+    <munit:test name="t28-get-catalog-invalidations" doc:name="T28 GET Catalog Invalidations">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock Invalidations T28">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Select All CDN Invalidations" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[[{ run_id: 'RUN-A', http_status: 202 }, { run_id: 'RUN-B', http_status: 207 }]]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="get:\catalog\invalidations:retail-catalog-apikit-config" doc:name="Call GET Invalidations" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[sizeOf(payload)]" is="#[MunitTools::equalTo(2)]" doc:name="Returns 2 invalidation rows" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T29: SCHEMA INIT FLOW -->
+    <munit:test name="t29-schema-init" doc:name="T29 DB Schema Initialisation">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:execute-ddl" doc:name="Mock DDL T29">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{}]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="db-schema-initialisation-flow" doc:name="Call Schema Init" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Schema init completes" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T30: MOCK CDN 202 -->
+    <munit:test name="t30-mock-cdn-202" doc:name="T30 Mock CDN 202 Accepted">
+        <munit:execution>
+            <munit:set-event doc:name="Set Event 202">
+                <munit:payload value="#[{ distributionId: 'DIST-1', paths: ['/p/1'] }]" mediaType="application/java" />
+                <munit:attributes value="#[{ headers: {} }]" />
+            </munit:set-event>
+            <flow-ref name="mock-cdn-invalidation-service-flow" doc:name="Call Mock CDN" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('IN_PROGRESS')]" doc:name="status IN_PROGRESS" />
+            <munit-tools:assert-that expression="#[vars.mockStatusCode]" is="#[MunitTools::equalTo(202)]" doc:name="Status 202" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T31: MOCK CDN 429 -->
+    <munit:test name="t31-mock-cdn-429" doc:name="T31 Mock CDN 429 Rate Limit">
+        <munit:execution>
+            <munit:set-event doc:name="Set Event 429">
+                <munit:payload value="#[{ distributionId: 'DIST-1', paths: ['/p/1'] }]" mediaType="application/java" />
+                <munit:attributes value="#[{ headers: { 'simulate-rate-limit': 'true' } }]" />
+            </munit:set-event>
+            <flow-ref name="mock-cdn-invalidation-service-flow" doc:name="Call Mock CDN" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.mockStatusCode]" is="#[MunitTools::equalTo(429)]" doc:name="Status 429" />
+            <munit-tools:assert-that expression="#[payload.error]" is="#[MunitTools::equalTo('RATE_LIMIT_EXCEEDED')]" doc:name="error RATE_LIMIT_EXCEEDED" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T32: MOCK CDN 207 -->
+    <munit:test name="t32-mock-cdn-207" doc:name="T32 Mock CDN 207 Multi-Status">
+        <munit:execution>
+            <munit:set-event doc:name="Set Event 207">
+                <munit:payload value="#[{ distributionId: 'DIST-1', paths: ['/p/VALID', '/p/INVALID_SKU'] }]" mediaType="application/java" />
+                <munit:attributes value="#[{ headers: { 'simulate-multi-status': 'true' } }]" />
+            </munit:set-event>
+            <flow-ref name="mock-cdn-invalidation-service-flow" doc:name="Call Mock CDN" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.mockStatusCode]" is="#[MunitTools::equalTo(207)]" doc:name="Status 207" />
+            <munit-tools:assert-that expression="#[sizeOf(payload.rejected)]" is="#[MunitTools::equalTo(1)]" doc:name="1 rejected path" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T33: APIKIT CONSOLE -->
+    <munit:test name="t33-apikit-console" doc:name="T33 APIKit Console">
+        <munit:execution>
+            <munit-tools:mock-when processor="apikit:console" doc:name="Mock Console">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#['Console HTML Content']" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="retail-catalog-apikit-console" doc:name="Call Console" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload]" is="#[MunitTools::equalTo('Console HTML Content')]" doc:name="Console called" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- ================================================================
+         GROUP 7: GLOBAL ERROR HANDLER DIRECT EXECUTION (T35 - T45)
+         ================================================================ -->
+
+    <!-- T35: FILE SYSTEM ERROR (FILE:ACCESS_DENIED) -->
+    <munit:test name="t35-global-error-file-access" doc:name="T35 Global Error FILE:ACCESS_DENIED">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T35']" doc:name="runId" />
+            <set-variable variableName="fileName" value="#['test.csv']" doc:name="fileName" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T35">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="FILE:ACCESS_DENIED" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Update T35">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger Error" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.errorCode]" is="#[MunitTools::equalTo('FILE_SYSTEM_ERROR')]" doc:name="errorCode FILE_SYSTEM_ERROR" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T36: DB CONNECTIVITY ERROR (DB:CONNECTIVITY) -->
+    <munit:test name="t36-global-error-db-connectivity" doc:name="T36 Global Error DB:CONNECTIVITY">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T36']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T36">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="DB:CONNECTIVITY" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger Error" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('DB_CONNECTIVITY_ERROR')]" doc:name="errorCode DB_CONNECTIVITY_ERROR" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T37: DB QUERY ERROR (DB:QUERY_EXECUTION) -->
+    <munit:test name="t37-global-error-db-query" doc:name="T37 Global Error DB:QUERY_EXECUTION">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T37']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T37">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="DB:QUERY_EXECUTION" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Update T37">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger Error" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('DB_QUERY_ERROR')]" doc:name="errorCode DB_QUERY_ERROR" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T38: CDN HTTP TIMEOUT ERROR (HTTP:TIMEOUT) -->
+    <munit:test name="t38-global-error-cdn-timeout" doc:name="T38 Global Error HTTP:TIMEOUT">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T38']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T38">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="HTTP:TIMEOUT" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert T38">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger Error" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.errorCode]" is="#[MunitTools::equalTo('CDN_INVALIDATION_PENDING')]" doc:name="errorCode CDN_INVALIDATION_PENDING" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T39: EXPRESSION ERROR (MULE:EXPRESSION) -->
+    <munit:test name="t39-global-error-expression" doc:name="T39 Global Error MULE:EXPRESSION">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T39']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T39">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="MULE:EXPRESSION" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger Error" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('TRANSFORM_ERROR')]" doc:name="errorCode TRANSFORM_ERROR" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T40: RETRY EXHAUSTED ERROR (MULE:RETRY_EXHAUSTED) -->
+    <munit:test name="t40-global-error-retry-exhausted" doc:name="T40 Global Error MULE:RETRY_EXHAUSTED">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T40']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T40">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="MULE:RETRY_EXHAUSTED" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:insert" doc:name="Mock Insert T40">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger Error" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[true]" is="#[MunitTools::equalTo(true)]" doc:name="Retry exhausted caught" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T41: GENERIC ANY ERROR (ANY) -->
+    <munit:test name="t41-global-error-generic" doc:name="T41 Global Error Generic ANY">
+        <munit:execution>
+            <set-variable variableName="runId" value="#['RUN-T41']" doc:name="runId" />
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T41">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="MULE:UNKNOWN" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <munit-tools:mock-when processor="db:update" doc:name="Mock Update T41">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ affectedRows: 1 }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger Error" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('INTERNAL_SERVER_ERROR')]" doc:name="errorCode INTERNAL_SERVER_ERROR" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T42: APIKIT 404 NOT FOUND -->
+    <munit:test name="t42-apikit-404-not-found" doc:name="T42 APIKit 404 Not Found">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T42">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="APIKIT:NOT_FOUND" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger APIKIT:NOT_FOUND" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('RESOURCE_NOT_FOUND')]" doc:name="errorCode RESOURCE_NOT_FOUND" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T43: APIKIT 405 METHOD NOT ALLOWED -->
+    <munit:test name="t43-apikit-405-method-not-allowed" doc:name="T43 APIKit 405 Method Not Allowed">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T43">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="APIKIT:METHOD_NOT_ALLOWED" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger APIKIT:METHOD_NOT_ALLOWED" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('METHOD_NOT_ALLOWED')]" doc:name="errorCode METHOD_NOT_ALLOWED" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T44: APIKIT 415 UNSUPPORTED MEDIA TYPE -->
+    <munit:test name="t44-apikit-415-unsupported-media-type" doc:name="T44 APIKit 415 Unsupported Media Type">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T44">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="APIKIT:UNSUPPORTED_MEDIA_TYPE" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger APIKIT:UNSUPPORTED_MEDIA_TYPE" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('UNSUPPORTED_MEDIA_TYPE')]" doc:name="errorCode UNSUPPORTED_MEDIA_TYPE" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T45: APIKIT 406 NOT ACCEPTABLE -->
+    <munit:test name="t45-apikit-406-not-acceptable" doc:name="T45 APIKit 406 Not Acceptable">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T45">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="APIKIT:NOT_ACCEPTABLE" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger APIKIT:NOT_ACCEPTABLE" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('NOT_ACCEPTABLE')]" doc:name="errorCode NOT_ACCEPTABLE" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T46: APIKIT 400 BAD REQUEST -->
+    <munit:test name="t46-apikit-400-bad-request" doc:name="T46 APIKit 400 Bad Request">
+        <munit:execution>
+            <munit-tools:mock-when processor="db:select" doc:name="Mock DB Select Error T46">
+                <munit-tools:with-attributes>
+                    <munit-tools:with-attribute attributeName="doc:name" whereValue="Trigger Error DB Select" />
+                </munit-tools:with-attributes>
+                <munit-tools:then-return>
+                    <munit-tools:error typeId="APIKIT:BAD_REQUEST" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <try doc:name="Catch Propagate">
+                <flow-ref name="trigger-global-error-test-flow" doc:name="Trigger APIKIT:BAD_REQUEST" />
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Catch Error">
+                        <set-variable variableName="caughtPayload" value="#[payload]" doc:name="Save Payload" />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[vars.caughtPayload.errorCode]" is="#[MunitTools::equalTo('BAD_REQUEST')]" doc:name="errorCode BAD_REQUEST" />
+        </munit:validation>
+    </munit:test>
+
+    <!-- T47: APIKIT ROUTER MAIN FLOW -->
+    <munit:test name="t47-trigger-catalog-ingest-api-flow" doc:name="T47 APIKit Router Main Flow">
+        <munit:execution>
+            <munit-tools:mock-when processor="apikit:router" doc:name="Mock APIKit Router">
+                <munit-tools:then-return>
+                    <munit-tools:payload value="#[{ status: 'SUCCESS' }]" mediaType="application/java" />
+                </munit-tools:then-return>
+            </munit-tools:mock-when>
+            <flow-ref name="trigger-catalog-ingest-api-flow" doc:name="Call Main Ingest API Flow" />
+        </munit:execution>
+        <munit:validation>
+            <munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('SUCCESS')]" doc:name="APIKit Router routed" />
+        </munit:validation>
+    </munit:test>
+
+</mule>

@@ -1,0 +1,46 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "severity": "HIGH",
+      "description": "18 of 36 tests (50%) use weak assertions (#[true] == true) that only confirm flows don't throw exceptions rather than validating business logic outcomes",
+      "fix": "Strengthen assertions in tests 008-010, 012-013, 015, 017, 025-028, 031-032, 034-036 to validate payload fields, variable values, or database operation counts instead of asserting true == true"
+    },
+    {
+      "severity": "HIGH",
+      "description": "Error handler tests (Group 4) catch errors but don't validate error response payload structure",
+      "fix": "Add assertions in tests 023-029 checking payload.errorCode, payload.errorMessage, or payload.status after error handling completes"
+    },
+    {
+      "severity": "MEDIUM",
+      "description": "CDN error recovery tests (013, 015, 025-027) don't verify retry behavior, timeout handling, or error state persistence",
+      "fix": "Add verify-call assertions checking http:request call count >1 for retry tests, or assert vars.retryCount, vars.cdnErrorState, or db:insert calls for error logging"
+    },
+    {
+      "severity": "MEDIUM",
+      "description": "Batch on-complete tests (032-033) don't verify post-batch side effects like delisting count or CDN invalidation trigger",
+      "fix": "Add assertions in test-032 checking vars.delistedCount > 0 or verify-call for db:update matching delisting operation; in test-033 verify http:request called with correct batch paths"
+    },
+    {
+      "severity": "MEDIUM",
+      "description": "File operation tests (034-036) don't verify file move outcomes or DDL execution count",
+      "fix": "Add verify-call assertions for file:move with specific targetPath attributes in tests 034-035; verify db:execute-ddl called atLeast=4 times in test-036 for table creation"
+    },
+    {
+      "severity": "LOW",
+      "description": "API endpoint tests validate response size/status but not response schema structure",
+      "fix": "Add assertions checking payload contains expected fields: test-018 should verify payload.runId exists, tests 019-022 should verify first array element has correct keys"
+    },
+    {
+      "severity": "LOW",
+      "description": "No test validates batch job pagination when processing large record sets",
+      "fix": "Modify test-032 to assert batch processing ran in multiple chunks (verify-call for db:insert atLeast=11 for 1100 records with batch size 100) or add vars.batchChunksProcessed assertion"
+    },
+    {
+      "severity": "LOW",
+      "description": "Change history detail recording not validated - test-003 verifies db:insert called but not that history record contains correct field_name, old_value, new_value",
+      "fix": "Add verify-call with with-attributes matching specific field changes (productName, price) to confirm granular history tracking"
+    }
+  ],
+  "reviewDoc": "e:\\mulesoft\\retail-catalog-update-papi6\\.agents\\tasks\\munit-review-final.md"
+}

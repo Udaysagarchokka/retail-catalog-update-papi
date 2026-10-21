@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="con" path="org.mule.tooling.MULE_PROJECT_LIB"/>
+	<classpathentry kind="con" path="MULE_LIB/org.mule.modules/mule-apikit-module/1.11.15"/>
+	<classpathentry kind="con" path="MULE_LIB/org.mule.connectors/mule-file-connector/1.5.7"/>
+	<classpathentry kind="con" path="MULE_LIB/com.mulesoft.munit/munit-tools/3.3.1"/>
+	<classpathentry kind="con" path="MULE_LIB/com.mulesoft.munit/munit-runner/3.3.1"/>
+	<classpathentry kind="con" path="MULE_LIB/org.mule.connectors/mule-http-connector/1.12.1"/>
+	<classpathentry kind="con" path="MULE_LIB/org.mule.connectors/mule-db-connector/1.16.4"/>
+	<classpathentry exported="true" kind="con" path="MULE_RUNTIME/org.mule.tooling.server.4.8.ee"/>
+	<classpathentry kind="con" path="org.eclipse.m2e.MAVEN2_CLASSPATH_CONTAINER">
+		<attributes>
+			<attribute name="maven.pomderived" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/org.mule.tooling.jdk.win32.x86_64_1.3.4">
+		<attributes>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="src" path="src/main/mule"/>
+	<classpathentry kind="src" path="src/main/java"/>
+	<classpathentry kind="src" path="src/main/resources"/>
+	<classpathentry kind="src" output="target/test-classes" path="src/test/java"/>
+	<classpathentry kind="src" output="target/test-classes" path="src/test/resources"/>
+	<classpathentry kind="src" path="src/test/munit"/>
+	<classpathentry kind="output" path="target/classes"/>
+</classpath>

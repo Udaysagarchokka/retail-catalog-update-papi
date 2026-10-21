@@ -1,0 +1,8 @@
+{
+    "minMuleVersion": "4.8.0",
+    "javaSpecificationVersions": ["17"],
+    "secureProperties": [
+        "cdn.api.token",
+        "db.password"
+    ]
+}

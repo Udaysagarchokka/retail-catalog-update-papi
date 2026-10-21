@@ -1,0 +1,421 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:file="http://www.mulesoft.org/schema/mule/file"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core    http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/file    http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/db      http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+
+    <!-- ================================================================
+         GLOBAL ERROR HANDLER
+         Covers every error type referenced in the PDF:
+           - APIKit routing errors (404 / 405 / 406 / 415)
+           - File system errors  → move to error directory
+           - Database errors     → propagate with structured JSON
+           - HTTP CDN errors     → continue (DB must NOT be reversed)
+           - Batch errors        → mark run FAILED in audit table
+           - Expression/transform errors
+           - Generic ANY fallback
+         All responses include: errorCode, runId, correlationId, timestamp
+         ================================================================ -->
+    <error-handler name="global-error-handler" doc:name="Global Error Handler">
+
+        <!-- ============================================================
+             APIKIT ROUTING ERRORS
+             404 Not Found, 405 Method Not Allowed,
+             406 Not Acceptable, 415 Unsupported Media Type
+             These are client errors — return the status the router chose.
+             ============================================================ -->
+        <on-error-propagate
+                type="APIKIT:NOT_FOUND"
+                enableNotifications="false"
+                logException="false"
+                doc:name="APIKit 404 Not Found">
+            <ee:transform doc:name="Build 404 Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: 404, errorCode: "RESOURCE_NOT_FOUND", message: "The requested resource does not exist.", path: attributes.requestPath default "" }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-propagate>
+
+        <on-error-propagate
+                type="APIKIT:METHOD_NOT_ALLOWED"
+                enableNotifications="false"
+                logException="false"
+                doc:name="APIKit 405 Method Not Allowed">
+            <ee:transform doc:name="Build 405 Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: 405, errorCode: "METHOD_NOT_ALLOWED", message: "HTTP method is not allowed on this resource." }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[405]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-propagate>
+
+        <on-error-propagate
+                type="APIKIT:NOT_ACCEPTABLE"
+                enableNotifications="false"
+                logException="false"
+                doc:name="APIKit 406 Not Acceptable">
+            <ee:transform doc:name="Build 406 Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: 406, errorCode: "NOT_ACCEPTABLE", message: "The requested media type is not supported in the response." }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[406]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-propagate>
+
+        <on-error-propagate
+                type="APIKIT:UNSUPPORTED_MEDIA_TYPE"
+                enableNotifications="false"
+                logException="false"
+                doc:name="APIKit 415 Unsupported Media Type">
+            <ee:transform doc:name="Build 415 Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: 415, errorCode: "UNSUPPORTED_MEDIA_TYPE", message: "Request body media type is not supported. Use text/csv for /catalog/trigger." }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[415]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-propagate>
+
+        <on-error-propagate
+                type="APIKIT:BAD_REQUEST"
+                enableNotifications="false"
+                logException="false"
+                doc:name="APIKit 400 Bad Request">
+            <ee:transform doc:name="Build 400 Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: 400, errorCode: "BAD_REQUEST", message: error.description default "Invalid request." }]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[400]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-propagate>
+
+        <!-- ============================================================
+             FILE SYSTEM ERRORS
+             Malformed / unreadable / inaccessible files are moved to the
+             error directory and the run is recorded as FAILED.
+             PDF requirement: "move it to the error directory with a clear reason"
+             ============================================================ -->
+        <on-error-continue
+                type="FILE:ACCESS_DENIED, FILE:ILLEGAL_PATH, FILE:FILE_ALREADY_EXISTS"
+                enableNotifications="true"
+                logException="true"
+                doc:name="File System Error — Move to Error Directory">
+            <logger level="ERROR" doc:name="Log File System Error"
+                    message="#['FILE_ERROR RunId=' ++ (vars.runId default 'N/A') ++ ' File=' ++ (vars.fileName default 'UNKNOWN') ++ ' CorrelationId=' ++ (vars.correlationId default correlationId) ++ ' Error=' ++ error.description]" />
+
+            <!-- Mark run FAILED if an audit row was already created -->
+            <try doc:name="Mark Run Failed if Exists">
+                <db:update doc:name="Mark Run FAILED" config-ref="Database_Config">
+                    <db:sql><![CDATA[UPDATE catalog_import_runs
+                                     SET run_status   = 'FAILED',
+                                         completed_at = CURRENT_TIMESTAMP
+                                     WHERE run_id = :runId AND run_status = 'IN_PROGRESS']]></db:sql>
+                    <db:input-parameters><![CDATA[#[{ runId: vars.runId default "UNKNOWN" }]]]></db:input-parameters>
+                </db:update>
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Ignore if No Run Row">
+                        <logger level="DEBUG" doc:name="No audit row to update" message="No IN_PROGRESS run row found — skipping FAILED update." />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+
+            <ee:transform doc:name="Build File Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:        "ERROR",
+    errorCode:     "FILE_SYSTEM_ERROR",
+    message:       "File access or directory permission error. File moved to error directory.",
+    details:       error.description,
+    fileName:      vars.fileName default "UNKNOWN",
+    timestamp:     now(),
+    correlationId: vars.correlationId default correlationId,
+    runId:         vars.runId default "N/A"
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- ============================================================
+             DATABASE CONNECTIVITY ERROR
+             Transient — propagate so retry scopes can catch it.
+             ============================================================ -->
+        <on-error-propagate
+                type="DB:CONNECTIVITY"
+                enableNotifications="true"
+                logException="true"
+                doc:name="DB Connectivity Error">
+            <logger level="ERROR" doc:name="Log DB Connectivity Error"
+                    message="#['DB_CONNECTIVITY_ERROR RunId=' ++ (vars.runId default 'N/A') ++ ' CorrelationId=' ++ (vars.correlationId default correlationId) ++ ' Error=' ++ error.description]" />
+            <ee:transform doc:name="Build DB Connectivity Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:        "ERROR",
+    errorCode:     "DB_CONNECTIVITY_ERROR",
+    message:       "Database connection failed. Transient retry recommended.",
+    details:       error.description,
+    timestamp:     now(),
+    correlationId: vars.correlationId default correlationId,
+    runId:         vars.runId default "N/A"
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </on-error-propagate>
+
+        <!-- ============================================================
+             DATABASE QUERY EXECUTION ERROR
+             Bad SQL, constraint violations, type mismatches.
+             Mark run FAILED and propagate.
+             ============================================================ -->
+        <on-error-propagate
+                type="DB:QUERY_EXECUTION, DB:BAD_SQL_SYNTAX"
+                enableNotifications="true"
+                logException="true"
+                doc:name="DB Query Execution Error">
+            <logger level="ERROR" doc:name="Log DB Query Error"
+                    message="#['DB_QUERY_ERROR RunId=' ++ (vars.runId default 'N/A') ++ ' Error=' ++ error.description]" />
+
+            <try doc:name="Mark Run FAILED on DB Query Error">
+                <db:update doc:name="Mark Run FAILED" config-ref="Database_Config">
+                    <db:sql><![CDATA[UPDATE catalog_import_runs
+                                     SET run_status   = 'FAILED',
+                                         completed_at = CURRENT_TIMESTAMP
+                                     WHERE run_id = :runId AND run_status = 'IN_PROGRESS']]></db:sql>
+                    <db:input-parameters><![CDATA[#[{ runId: vars.runId default "UNKNOWN" }]]]></db:input-parameters>
+                </db:update>
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Ignore Secondary DB Error">
+                        <logger level="DEBUG" doc:name="Ignore secondary DB failure" message="Could not update run status to FAILED." />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+
+            <ee:transform doc:name="Build DB Query Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:        "ERROR",
+    errorCode:     "DB_QUERY_ERROR",
+    message:       "A database query execution error occurred.",
+    details:       error.description,
+    timestamp:     now(),
+    correlationId: vars.correlationId default correlationId,
+    runId:         vars.runId default "N/A"
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </on-error-propagate>
+
+        <!-- ============================================================
+             CDN / HTTP INVALIDATION ERRORS
+             PDF requirement: "A failure of the invalidation step must NOT
+             reverse a successful database update, but must be recorded
+             as pending so that it can be retried."
+             Use on-error-CONTINUE so the flow does not roll back DB commits.
+             ============================================================ -->
+        <on-error-continue
+                type="HTTP:CONNECTIVITY, HTTP:TIMEOUT, HTTP:TOO_MANY_REQUESTS, HTTP:UNAUTHORIZED, HTTP:SERVICE_UNAVAILABLE"
+                enableNotifications="true"
+                logException="true"
+                doc:name="CDN HTTP Error — Preserve DB, Record as Pending">
+            <logger level="WARN" doc:name="Log CDN HTTP Error"
+                    message="#['CDN_HTTP_ERROR RunId=' ++ (vars.runId default 'N/A') ++ ' Batch=' ++ (vars.requestReference default 'N/A') ++ ' ErrorType=' ++ error.errorType.identifier ++ ' Details=' ++ error.description]" />
+
+            <!-- Record the invalidation batch as pending for later retry -->
+            <try doc:name="Record CDN Failure as Pending">
+                <db:insert doc:name="Insert Pending CDN Invalidation" config-ref="Database_Config">
+                    <db:sql><![CDATA[INSERT INTO cdn_invalidations
+                                     (run_id, request_ref, path_count, paths, http_status, provider_status, attempt_count, confirmed)
+                                     VALUES (:runId, :requestRef, :pathCount, :paths, 0, 'PENDING_RETRY', 1, FALSE)]]></db:sql>
+                    <db:input-parameters><![CDATA[#[{
+    runId:      vars.runId default "UNKNOWN",
+    requestRef: vars.requestReference default "UNKNOWN",
+    pathCount:  sizeOf(vars.currentBatchPaths default []),
+    paths:      write(vars.currentBatchPaths default [], "application/json")
+}]]]></db:input-parameters>
+                </db:insert>
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Ignore secondary DB failure">
+                        <logger level="ERROR" doc:name="Could not persist pending CDN record"
+                                message="Could not persist PENDING_RETRY CDN invalidation record." />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+
+            <ee:transform doc:name="Build CDN Warning Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:        "WARNING",
+    errorCode:     "CDN_INVALIDATION_PENDING",
+    message:       "CDN invalidation failed. Database updates are preserved. Invalidation recorded as PENDING_RETRY.",
+    details:       error.description,
+    timestamp:     now(),
+    correlationId: vars.correlationId default correlationId,
+    runId:         vars.runId default "N/A"
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </on-error-continue>
+
+        <!-- ============================================================
+             DATAWEAVE / EXPRESSION ERRORS
+             Transformation failures — propagate with structured error.
+             ============================================================ -->
+        <on-error-propagate
+                type="EXPRESSION, TRANSFORMATION"
+                enableNotifications="true"
+                logException="true"
+                doc:name="DataWeave Expression or Transformation Error">
+            <logger level="ERROR" doc:name="Log Transform Error"
+                    message="#['TRANSFORM_ERROR RunId=' ++ (vars.runId default 'N/A') ++ ' SKU=' ++ (vars.currentRecord.sku default 'N/A') ++ ' Error=' ++ error.description]" />
+            <ee:transform doc:name="Build Transform Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:        "ERROR",
+    errorCode:     "TRANSFORM_ERROR",
+    message:       "A DataWeave transformation failed during processing.",
+    details:       error.description,
+    sku:           vars.currentRecord.sku default "N/A",
+    timestamp:     now(),
+    correlationId: vars.correlationId default correlationId,
+    runId:         vars.runId default "N/A"
+}]]></ee:set-payload>
+                </ee:message>
+            </ee:transform>
+        </on-error-propagate>
+
+        <!-- ============================================================
+             RETRY_EXHAUSTED (from until-successful)
+             Thrown when all retries inside until-successful are exhausted.
+             Continue so DB is never reversed.
+             ============================================================ -->
+        <on-error-continue
+                type="MULE:RETRY_EXHAUSTED"
+                enableNotifications="true"
+                logException="true"
+                doc:name="Retry Exhausted — Record Unconfirmed CDN Batch">
+            <logger level="ERROR" doc:name="Log Retry Exhausted"
+                    message="#['CDN_RETRY_EXHAUSTED RunId=' ++ (vars.runId default 'N/A') ++ ' BatchRef=' ++ (vars.requestReference default 'N/A') ++ '. All retries exhausted. DB preserved, invalidation marked UNCONFIRMED.']" />
+
+            <try doc:name="Record Retry-Exhausted Batch as Unconfirmed">
+                <db:insert doc:name="Insert Retry-Exhausted CDN Record" config-ref="Database_Config">
+                    <db:sql><![CDATA[INSERT INTO cdn_invalidations
+                                     (run_id, request_ref, path_count, paths, http_status, provider_status, attempt_count, confirmed)
+                                     VALUES (:runId, :requestRef, :pathCount, :paths, 0, 'RETRY_EXHAUSTED', 3, FALSE)]]></db:sql>
+                    <db:input-parameters><![CDATA[#[{
+    runId:      vars.runId default "UNKNOWN",
+    requestRef: vars.requestReference default "UNKNOWN",
+    pathCount:  sizeOf(vars.currentBatchPaths default []),
+    paths:      write(vars.currentBatchPaths default [], "application/json")
+}]]]></db:input-parameters>
+                </db:insert>
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Ignore secondary DB failure">
+                        <logger level="ERROR" doc:name="Could not persist retry-exhausted CDN record" message="Could not persist RETRY_EXHAUSTED CDN invalidation record." />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+        </on-error-continue>
+
+        <!-- ============================================================
+             GENERIC ANY FALLBACK
+             PDF requirement: "Use a global error-handling strategy to log
+             a consistent error with the run identifier, file name, and
+             SKU where applicable."
+             Mark run FAILED, then propagate so HTTP response is sent.
+             ============================================================ -->
+        <on-error-propagate
+                type="ANY"
+                enableNotifications="true"
+                logException="true"
+                doc:name="Generic Any Error Fallback">
+            <logger level="ERROR" doc:name="Log Generic Error"
+                    message="#['UNEXPECTED_ERROR RunId=' ++ (vars.runId default 'N/A') ++ ' File=' ++ (vars.fileName default 'N/A') ++ ' SKU=' ++ (vars.currentRecord.sku default 'N/A') ++ ' ErrorType=' ++ error.errorType.identifier ++ ' Error=' ++ error.description]" />
+
+            <!-- Mark run FAILED in audit table if it was IN_PROGRESS -->
+            <try doc:name="Mark Run FAILED on Unexpected Error">
+                <db:update doc:name="Mark Run FAILED" config-ref="Database_Config">
+                    <db:sql><![CDATA[UPDATE catalog_import_runs
+                                     SET run_status   = 'FAILED',
+                                         completed_at = CURRENT_TIMESTAMP
+                                     WHERE run_id = :runId AND run_status = 'IN_PROGRESS']]></db:sql>
+                    <db:input-parameters><![CDATA[#[{ runId: vars.runId default "UNKNOWN" }]]]></db:input-parameters>
+                </db:update>
+                <error-handler>
+                    <on-error-continue type="ANY" doc:name="Ignore secondary DB failure">
+                        <logger level="DEBUG" doc:name="No audit row to update" message="No IN_PROGRESS run row to mark FAILED." />
+                    </on-error-continue>
+                </error-handler>
+            </try>
+
+            <ee:transform doc:name="Build Generic 500 Error Response">
+                <ee:message>
+                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    status:        "ERROR",
+    errorCode:     "INTERNAL_SERVER_ERROR",
+    message:       error.description default "An unexpected error occurred during catalog processing.",
+    errorType:     error.errorType.identifier default "UNKNOWN",
+    timestamp:     now(),
+    correlationId: vars.correlationId default correlationId,
+    runId:         vars.runId default "N/A",
+    fileName:      vars.fileName default "N/A",
+    sku:           vars.currentRecord.sku default "N/A"
+}]]></ee:set-payload>
+                </ee:message>
+                <ee:variables>
+                    <ee:set-variable variableName="httpStatus"><![CDATA[500]]></ee:set-variable>
+                </ee:variables>
+            </ee:transform>
+        </on-error-propagate>
+
+    </error-handler>
+
+</mule>

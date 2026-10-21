@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway"
+      xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:file="http://www.mulesoft.org/schema/mule/file"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core        http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http        http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/file        http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/db          http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
+        http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+    <!-- ============================================================
+         API Autodiscovery
+         ============================================================ -->
+    <api-gateway:autodiscovery
+            apiId="${api.id}"
+            doc:name="API Autodiscovery"
+            flowRef="trigger-catalog-ingest-api-flow"
+            ignoreBasePath="true" />
+
+    <!-- ============================================================
+         Configuration Properties
+         ============================================================ -->
+    <configuration-properties
+            doc:name="Delta Rules Configuration Properties"
+            file="config/catalog-delta.yaml" />
+
+    <configuration-properties
+            doc:name="Environment Configuration Properties"
+            file="config/config-dev.yaml" />
+
+    <!-- ============================================================
+         Default Global Error Handler
+         ============================================================ -->
+    <configuration
+            doc:name="Configuration"
+            defaultErrorHandler-ref="global-error-handler" />
+
+    <!-- ============================================================
+         HTTP Listener Configuration  (port from config-dev.yaml)
+         ============================================================ -->
+    <http:listener-config
+            name="HTTP_Listener_config"
+            doc:name="HTTP Listener config">
+        <http:listener-connection host="0.0.0.0" port="${http.port}" />
+    </http:listener-config>
+
+    <!-- ============================================================
+         CDN HTTP Request Configuration
+         ============================================================ -->
+    <http:request-config
+            name="CDN_HTTP_Request_configuration"
+            doc:name="HTTP Request configuration CDN"
+            responseTimeout="${cdn.timeout}">
+        <http:request-connection
+                host="${cdn.host}"
+                port="${cdn.port}" />
+    </http:request-config>
+
+    <!-- ============================================================
+         File Connector Configuration
+         ============================================================ -->
+    <file:config
+            name="File_Config"
+            doc:name="File Config"
+            defaultWriteEncoding="UTF-8">
+        <file:connection workingDir="e:\mulesoft\retail-catalog-update-papi6" />
+    </file:config>
+
+    <!-- ============================================================
+         MySQL Database Configuration — Aiven Cloud (SSL required)
+         Credentials externalised in config-dev.yaml
+         db.password declared as secureProperty in mule-artifact.json
+         ============================================================ -->
+    <db:config name="Database_Config" doc:name="Database Config">
+        <db:my-sql-connection
+                host="${db.host}"
+                port="${db.port}"
+                user="${db.user}"
+                password="${db.password}"
+                database="${db.name}">
+            <db:connection-properties>
+                <db:connection-property key="useSSL"                  value="true" />
+                <db:connection-property key="requireSSL"              value="true" />
+                <db:connection-property key="verifyServerCertificate" value="false" />
+                <db:connection-property key="allowPublicKeyRetrieval" value="true" />
+                <db:connection-property key="serverTimezone"          value="UTC" />
+            </db:connection-properties>
+        </db:my-sql-connection>
+    </db:config>
+
+    <!-- ============================================================
+         APIKit Router Configuration — wired to RAML spec
+         ============================================================ -->
+    <apikit:config
+            name="retail-catalog-apikit-config"
+            raml="api/retail-catalog-papi.raml"
+            outboundHeadersMapName="outboundHeaders"
+            httpStatusVarName="httpStatus"
+            parser="RAML"
+            doc:name="APIKit Config" />
+
+    <!-- ============================================================
+         Startup Flow — Creates all 4 PDF tables (IF NOT EXISTS)
+         Runs once on startup via daily scheduler (startDelay=0)
+         ============================================================ -->
+    <flow name="db-schema-initialisation-flow" doc:name="DB Schema Initialisation Flow">
+        <scheduler doc:name="Run Once On Startup">
+            <scheduling-strategy>
+                <fixed-frequency frequency="1" timeUnit="DAYS" startDelay="0" />
+            </scheduling-strategy>
+        </scheduler>
+
+        <logger level="INFO" doc:name="Log Schema Init Start"
+                message="Initialising MySQL database schema for retail_catalog..." />
+
+        <!-- Table 1: products -->
+        <db:execute-ddl doc:name="Create Table: products" config-ref="Database_Config">
+            <db:sql><![CDATA[CREATE TABLE IF NOT EXISTS products (
+    sku                 VARCHAR(40)   PRIMARY KEY,
+    product_name        VARCHAR(200)  NOT NULL,
+    category_code       VARCHAR(20)   NOT NULL,
+    brand               VARCHAR(80),
+    price               DECIMAL(12,2) NOT NULL,
+    currency            CHAR(3)       NOT NULL,
+    tax_class           VARCHAR(10),
+    stock_status        VARCHAR(15)   NOT NULL,
+    product_status      VARCHAR(15)   NOT NULL,
+    short_description   VARCHAR(500),
+    image_path          VARCHAR(300),
+    content_hash        VARCHAR(64)   NOT NULL,
+    source_updated_at   TIMESTAMP NULL DEFAULT NULL,
+    last_run_id         VARCHAR(40),
+    review_hold         BOOLEAN       DEFAULT FALSE,
+    updated_at          TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)]]></db:sql>
+        </db:execute-ddl>
+
+        <!-- Table 2: product_change_history -->
+        <db:execute-ddl doc:name="Create Table: product_change_history" config-ref="Database_Config">
+            <db:sql><![CDATA[CREATE TABLE IF NOT EXISTS product_change_history (
+    change_seq      BIGINT      AUTO_INCREMENT PRIMARY KEY,
+    run_id          VARCHAR(40) NOT NULL,
+    sku             VARCHAR(40) NOT NULL,
+    change_type     VARCHAR(15) NOT NULL,
+    field_name      VARCHAR(40),
+    old_value       VARCHAR(500),
+    new_value       VARCHAR(500),
+    customer_facing BOOLEAN     NOT NULL,
+    changed_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+)]]></db:sql>
+        </db:execute-ddl>
+
+        <!-- Table 3: catalog_import_runs -->
+        <db:execute-ddl doc:name="Create Table: catalog_import_runs" config-ref="Database_Config">
+            <db:sql><![CDATA[CREATE TABLE IF NOT EXISTS catalog_import_runs (
+    run_id                VARCHAR(40)  PRIMARY KEY,
+    file_name             VARCHAR(200) NOT NULL,
+    file_checksum         VARCHAR(64)  NOT NULL,
+    extract_type          VARCHAR(10)  NOT NULL,
+    parsed_count          INT,
+    new_count             INT,
+    changed_count         INT,
+    unchanged_count       INT,
+    delisted_count        INT,
+    held_count            INT,
+    rejected_count        INT,
+    invalidation_requests INT,
+    invalidation_paths    INT,
+    unconfirmed_paths     INT,
+    run_status            VARCHAR(20)  NOT NULL,
+    started_at            TIMESTAMP NULL DEFAULT NULL,
+    completed_at          TIMESTAMP NULL DEFAULT NULL,
+    correlation_id        VARCHAR(50),
+    UNIQUE KEY uk_catalog_file (file_name, file_checksum)
+)]]></db:sql>
+        </db:execute-ddl>
+
+        <!-- Table 4: cdn_invalidations -->
+        <db:execute-ddl doc:name="Create Table: cdn_invalidations" config-ref="Database_Config">
+            <db:sql><![CDATA[CREATE TABLE IF NOT EXISTS cdn_invalidations (
+    invalidation_seq BIGINT      AUTO_INCREMENT PRIMARY KEY,
+    run_id           VARCHAR(40) NOT NULL,
+    request_ref      VARCHAR(80),
+    path_count       INT         NOT NULL,
+    paths            TEXT        NOT NULL,
+    http_status      INT,
+    provider_status  VARCHAR(20),
+    attempt_count    INT         DEFAULT 1,
+    confirmed        BOOLEAN     DEFAULT FALSE,
+    requested_at     TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+)]]></db:sql>
+        </db:execute-ddl>
+
+        <logger level="INFO" doc:name="Log Schema Init Complete"
+                message="MySQL schema initialisation complete. All 4 tables verified (products, product_change_history, catalog_import_runs, cdn_invalidations)." />
+
+        <!-- Ensure content_hash column is wide enough for pipe-joined fingerprint -->
+        <db:execute-ddl doc:name="Widen content_hash column" config-ref="Database_Config">
+            <db:sql><![CDATA[ALTER TABLE products MODIFY COLUMN content_hash VARCHAR(200) NOT NULL]]></db:sql>
+        </db:execute-ddl>
+    </flow>
+
+</mule>

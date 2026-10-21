@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<groupId>com.cognizant.retail</groupId>
+	<artifactId>retail-catalog-update-papi</artifactId>
+	<version>1.0.0-SNAPSHOT</version>
+	<packaging>mule-application</packaging>
+
+	<name>retail-catalog-update-papi</name>
+	<description>Retail Real-Time Product Catalog Update — NPN MuleSoft Hackathon 2027</description>
+
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+		<!-- Runtime version matching Studio 7.24 installed server (4.8.ee) -->
+		<app.runtime>4.8.12</app.runtime>
+
+		<!-- Mule Maven plugin -->
+		<mule.maven.plugin.version>4.8.0</mule.maven.plugin.version>
+
+		<!-- MUnit 3.3.1 — complete JARs confirmed in local Maven cache -->
+		<munit.version>3.3.1</munit.version>
+	</properties>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-clean-plugin</artifactId>
+				<version>3.2.0</version>
+			</plugin>
+			<plugin>
+				<groupId>org.mule.tools.maven</groupId>
+				<artifactId>mule-maven-plugin</artifactId>
+				<version>${mule.maven.plugin.version}</version>
+				<extensions>true</extensions>
+				<configuration>
+					<classifier>mule-application</classifier>
+					<sharedLibraries>
+						<sharedLibrary>
+							<groupId>com.mysql</groupId>
+							<artifactId>mysql-connector-j</artifactId>
+						</sharedLibrary>
+					</sharedLibraries>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>com.mulesoft.munit.tools</groupId>
+				<artifactId>munit-maven-plugin</artifactId>
+				<version>${munit.version}</version>
+				<executions>
+					<execution>
+						<id>test</id>
+						<phase>test</phase>
+						<goals>
+							<goal>test</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<runtimeVersion>4.8.12</runtimeVersion>
+					<coverage>
+						<runCoverage>true</runCoverage>
+						<failBuild>false</failBuild>
+						<requiredApplicationCoverage>85</requiredApplicationCoverage>
+						<requiredResourceCoverage>75</requiredResourceCoverage>
+						<requiredFlowCoverage>75</requiredFlowCoverage>
+						<formats>
+							<format>html</format>
+							<format>json</format>
+							<format>console</format>
+						</formats>
+					</coverage>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+
+	<dependencies>
+
+		<!-- HTTP Connector — v1.12.1 in local Maven cache -->
+		<dependency>
+			<groupId>org.mule.connectors</groupId>
+			<artifactId>mule-http-connector</artifactId>
+			<version>1.12.1</version>
+			<classifier>mule-plugin</classifier>
+		</dependency>
+
+		<!-- APIKit Module — v1.11.15: fixes AMF binary model bug in 1.12.x -->
+		<dependency>
+			<groupId>org.mule.modules</groupId>
+			<artifactId>mule-apikit-module</artifactId>
+			<version>1.11.15</version>
+			<classifier>mule-plugin</classifier>
+		</dependency>
+
+		<!-- File Connector — v1.5.7 confirmed complete in local Maven cache -->
+		<dependency>
+			<groupId>org.mule.connectors</groupId>
+			<artifactId>mule-file-connector</artifactId>
+			<version>1.5.7</version>
+			<classifier>mule-plugin</classifier>
+		</dependency>
+
+		<!-- DB Connector — v1.16.4 in local Maven cache -->
+		<dependency>
+			<groupId>org.mule.connectors</groupId>
+			<artifactId>mule-db-connector</artifactId>
+			<version>1.16.4</version>
+			<classifier>mule-plugin</classifier>
+		</dependency>
+
+		<!-- MySQL JDBC Driver — com.mysql groupId, v8.0.33 confirmed complete -->
+		<dependency>
+			<groupId>com.mysql</groupId>
+			<artifactId>mysql-connector-j</artifactId>
+			<version>8.0.33</version>
+		</dependency>
+
+		<!-- MUnit test dependencies — v3.3.1 complete JARs in local Maven cache -->
+		<dependency>
+			<groupId>com.mulesoft.munit</groupId>
+			<artifactId>munit-runner</artifactId>
+			<version>${munit.version}</version>
+			<classifier>mule-plugin</classifier>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>com.mulesoft.munit</groupId>
+			<artifactId>munit-tools</artifactId>
+			<version>${munit.version}</version>
+			<classifier>mule-plugin</classifier>
+			<scope>test</scope>
+		</dependency>
+
+	</dependencies>
+
+	<repositories>
+		<repository>
+			<id>anypoint-exchange-v3</id>
+			<name>Anypoint Exchange</name>
+			<url>https://maven.anypoint.mulesoft.com/api/v3/maven</url>
+			<layout>default</layout>
+		</repository>
+		<repository>
+			<id>mulesoft-releases</id>
+			<name>MuleSoft Releases Repository</name>
+			<url>https://repository.mulesoft.org/releases/</url>
+			<layout>default</layout>
+		</repository>
+	</repositories>
+
+	<pluginRepositories>
+		<pluginRepository>
+			<id>mulesoft-releases</id>
+			<name>MuleSoft Releases Repository</name>
+			<layout>default</layout>
+			<url>https://repository.mulesoft.org/releases/</url>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+		</pluginRepository>
+	</pluginRepositories>
+
+</project>
